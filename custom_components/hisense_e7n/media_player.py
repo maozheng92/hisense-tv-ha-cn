@@ -33,7 +33,7 @@ from .keys import (
     KEY_VOLUMEUP,
 )
 
-# No VOLUME_SET: +/- is LAN remoter KEY_VOLUME* only (eARC).
+# No VOLUME_SET: +/- uses MQTT sendkey KEY_VOLUME* + LAN remoter (eARC).
 # VOLUME_STEP only — never a HA slider.
 SUPPORT = (
     MediaPlayerEntityFeature.TURN_ON

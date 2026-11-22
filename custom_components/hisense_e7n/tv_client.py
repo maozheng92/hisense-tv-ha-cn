@@ -33,7 +33,6 @@ from .const import (
     REMOTER_READY_POLL,
     REMOTER_READY_TIMEOUT,
     VOLUME_CEC_GAP,
-    VOLUME_CEC_RETRY_WAIT,
     VOLUME_KEY_IDLE_WARMUP,
     VOLUME_KEY_PAUSE,
     VOLUME_TYPE_ARC,
@@ -230,8 +229,6 @@ class HisenseTvClient:
         self._volume_lock = threading.Lock()
         self._last_remoter_ok_at = 0.0
         self._last_volume_deliver_at = 0.0
-        self._volume_ack = threading.Event()
-        self._awaiting_volume_ack = False
 
     @property
     def creds(self) -> MqttCredentials | None:
@@ -260,27 +257,14 @@ class HisenseTvClient:
             return
         loop.call_soon_threadsafe(event.set)
 
-    def _signal_volume_ack(self, before: int | None) -> None:
-        if not self._awaiting_volume_ack:
-            return
-        _LOGGER.info(
-            "MQTT volumechange volume=%s type=%s",
-            self.state.volume,
-            self.state.volume_type,
-        )
-        if self.state.volume is not None and self.state.volume != before:
-            self._volume_ack.set()
-
     def _apply_volume(self, data: Any) -> None:
         if data is None:
             return
-        before = self.state.volume
         payload = data
         if isinstance(data, list) and data:
             payload = data[0]
         if isinstance(payload, (int, float, str)) and str(payload).isdigit():
             self.state.volume = int(payload)
-            self._signal_volume_ack(before)
             return
         if not isinstance(payload, dict):
             return
@@ -310,7 +294,6 @@ class HisenseTvClient:
         mute = payload.get("mute", payload.get("mute_status"))
         if mute is not None:
             self.state.muted = str(mute) in {"1", "true", "True", "on"} or mute is True
-        self._signal_volume_ack(before)
 
     def _apply_state(self, data: Any) -> None:
         if not isinstance(data, dict):
@@ -843,16 +826,14 @@ class HisenseTvClient:
         *,
         pause: Callable[[float], None] = time.sleep,
     ) -> bool:
-        """One media_player +/- step: LAN KEY_VOLUME, retry if CEC silent.
+        """One media_player +/- step: a single LAN KEY_VOLUME, paced for CEC.
 
-        08-15 log (1.22.8): 11× ``TV accepted KEY_VOLUMEUP on port 7778`` /
-        HTTP 200, user still heard misses. Remoter ACK is not CEC ACK. This
-        TV has never published MQTT ``volumechange`` in HA logs.
+        User: MQTT cannot control volume — use LAN. Dual MQTT+LAN (15:51)
+        flooded CEC (2/8 heard). MQTT-only sendkey also did not move volume.
 
-        1. Wait ``VOLUME_CEC_GAP`` since the last KEY.
-        2. One LAN ``KEY_VOLUME*`` (no MQTT sendkey / changevolume).
-        3. Wait ``VOLUME_CEC_RETRY_WAIT`` for MQTT volumechange.
-        4. If none, one LAN retry — not a second channel.
+        1. Wait ``VOLUME_CEC_GAP`` since the last KEY (0.9s).
+        2. Deliver **one** ``KEY_VOLUME*`` via LAN remoter (7778/7779).
+        3. Never MQTT ``sendkey`` / ``changevolume`` on this path.
 
         No ``VOLUME_SET`` slider.
         """
@@ -861,51 +842,29 @@ class HisenseTvClient:
             raise ValueError(f"not a volume key: {key}")
         delta = 1 if name == KEY_VOLUMEUP else -1
         gap = max(0.0, float(VOLUME_CEC_GAP))
-        wait = max(0.0, float(VOLUME_CEC_RETRY_WAIT))
         with self._volume_lock:
             since = time.monotonic() - self._last_volume_deliver_at
             if gap and since < gap:
                 pause(gap - since)
                 _LOGGER.info("volume step CEC pace %.2fs before LAN", gap)
 
-            self._volume_ack.clear()
-            self._awaiting_volume_ack = True
-            try:
-                delivered = self._lan_volume_key(name, pause=pause)
-                if delivered and wait:
-                    pause(wait)
-                    if self._volume_ack.is_set():
-                        _LOGGER.info("volume step MQTT volumechange confirmed")
-                    else:
-                        _LOGGER.info("volume step no volumechange; LAN retry %s", name)
-                        delivered = self._lan_volume_key(name, pause=pause) or delivered
-            finally:
-                self._awaiting_volume_ack = False
+            idle = time.monotonic() - self._last_remoter_ok_at
+            if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
+                self._wait_for_remoter(pause=pause)
+            status = send_local_key(self.host, name)
+            delivered = status is not None and 200 <= status < 300
+            if delivered:
+                self._last_remoter_ok_at = time.monotonic()
+                self._control_warmup = False
+                _LOGGER.info("volume step LAN %s (status %s)", name, status)
+            else:
+                _LOGGER.info("volume step LAN %s missed (status %s)", name, status)
 
             self._last_volume_deliver_at = time.monotonic()
             if delivered:
                 self._note_volume_delta(delta)
                 return True
             return False
-
-    def _lan_volume_key(
-        self,
-        name: str,
-        *,
-        pause: Callable[[float], None],
-    ) -> bool:
-        idle = time.monotonic() - self._last_remoter_ok_at
-        if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
-            self._wait_for_remoter(pause=pause)
-        status = send_local_key(self.host, name)
-        ok = status is not None and 200 <= status < 300
-        if ok:
-            self._last_remoter_ok_at = time.monotonic()
-            self._control_warmup = False
-            _LOGGER.info("volume step LAN %s (status %s)", name, status)
-            return True
-        _LOGGER.info("volume step LAN %s missed (status %s)", name, status)
-        return False
 
     def _press_volume_key(
         self,
