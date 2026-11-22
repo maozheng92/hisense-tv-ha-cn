@@ -37,9 +37,8 @@ VOLUME_TYPE_MUTE = 2
 # TV-speaker KEY_VOLUME* pacing (not a substitute for ARC CEC volume).
 VOLUME_KEY_PAUSE = 0.05
 VOLUME_KEY_IDLE_WARMUP = 1.5
-# eARC CEC: one KEY_VOLUME per press, paced between presses.
-# HA log 15:51 (1.22.6): MQTT+LAN every press with 0.35s spacing made a
-# continuous KEY every ~0.35s; only 2/8 heard (last was one success).
+# eARC CEC: one LAN KEY_VOLUME per press (MQTT sendkey does not move volume).
+# Dual MQTT+LAN (15:51) flooded CEC; keep a gap between LAN keys.
 VOLUME_CEC_GAP = 0.9
 
 # When the current level is unknown, drive to 0 then climb (extra downs are no-ops).

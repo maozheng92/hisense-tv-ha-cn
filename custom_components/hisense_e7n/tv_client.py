@@ -826,20 +826,14 @@ class HisenseTvClient:
         *,
         pause: Callable[[float], None] = time.sleep,
     ) -> bool:
-        """One media_player +/- step: a single KEY_VOLUME, paced for eARC CEC.
+        """One media_player +/- step: a single LAN KEY_VOLUME, paced for CEC.
 
-        HA log 15:51 (1.22.6): each press still did MQTT ``sendkey`` then LAN
-        KEY with a 0.35s gap. While the user held +/-, that became a continuous
-        KEY every ~0.35s (MQTT, LAN, MQTT, LAN…). Only 2 of 8 presses were
-        heard; the second success was the last line. Dual delivery was flooding
-        CEC — spacing the two channels was not enough.
-
-        Protocol now matching that evidence:
+        User: MQTT cannot control volume — use LAN. Dual MQTT+LAN (15:51)
+        flooded CEC (2/8 heard). MQTT-only sendkey also did not move volume.
 
         1. Wait ``VOLUME_CEC_GAP`` since the last KEY (0.9s).
-        2. Deliver **one** ``KEY_VOLUME*`` via MQTT ``sendkey`` (CEC).
-        3. LAN remoter only if MQTT publish fails — never both on one press.
-        4. Never ``changevolume→100``.
+        2. Deliver **one** ``KEY_VOLUME*`` via LAN remoter (7778/7779).
+        3. Never MQTT ``sendkey`` / ``changevolume`` on this path.
 
         No ``VOLUME_SET`` slider.
         """
@@ -852,35 +846,19 @@ class HisenseTvClient:
             since = time.monotonic() - self._last_volume_deliver_at
             if gap and since < gap:
                 pause(gap - since)
-                _LOGGER.info("volume step CEC pace %.2fs before KEY", gap)
+                _LOGGER.info("volume step CEC pace %.2fs before LAN", gap)
 
-            delivered = False
-
-            # Single KEY: MQTT sendkey first (CEC remoter path).
-            try:
-                self._publish_action("remote_service", "sendkey", name, as_key=True)
-                delivered = True
-                _LOGGER.info("volume step MQTT sendkey %s (single)", name)
-            except RuntimeError:
-                _LOGGER.debug("volume step MQTT sendkey failed", exc_info=True)
-
-            # LAN only when MQTT did not publish — dual fire flooded CEC (15:51).
-            if not delivered:
-                idle = time.monotonic() - self._last_remoter_ok_at
-                if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
-                    self._wait_for_remoter(pause=pause)
-                status = send_local_key(self.host, name)
-                if status is not None and 200 <= status < 300:
-                    delivered = True
-                    self._last_remoter_ok_at = time.monotonic()
-                    self._control_warmup = False
-                    _LOGGER.info(
-                        "volume step LAN %s fallback (status %s)", name, status
-                    )
-                else:
-                    _LOGGER.info(
-                        "volume step LAN %s fallback missed (status %s)", name, status
-                    )
+            idle = time.monotonic() - self._last_remoter_ok_at
+            if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
+                self._wait_for_remoter(pause=pause)
+            status = send_local_key(self.host, name)
+            delivered = status is not None and 200 <= status < 300
+            if delivered:
+                self._last_remoter_ok_at = time.monotonic()
+                self._control_warmup = False
+                _LOGGER.info("volume step LAN %s (status %s)", name, status)
+            else:
+                _LOGGER.info("volume step LAN %s missed (status %s)", name, status)
 
             self._last_volume_deliver_at = time.monotonic()
             if delivered:
