@@ -37,6 +37,10 @@ VOLUME_TYPE_MUTE = 2
 # TV-speaker KEY_VOLUME* pacing (not a substitute for ARC CEC volume).
 VOLUME_KEY_PAUSE = 0.05
 VOLUME_KEY_IDLE_WARMUP = 1.5
+# eARC CEC drops KEY_VOLUME when MQTT sendkey and LAN fire ~15ms apart
+# (HA log 07-42-26: 13–15ms gaps failed; ~80–90ms sometimes worked).
+VOLUME_CEC_GAP = 0.35
+
 # When the current level is unknown, drive to 0 then climb (extra downs are no-ops).
 VOLUME_UNKNOWN_FLOOR_STEPS = 100
 # Wait for TCP 7778/7779 after power-on / MQTT reconnect before the first key.

@@ -223,10 +223,10 @@ def test_wol_packet_shape(proto_client, monkeypatch) -> None:
     assert addr[1] == 9
 
 
-def test_volume_step_uses_sendkey_and_lan_not_changevolume_100(
+def test_volume_step_spaces_mqtt_and_lan_for_cec(
     proto_client, proto_credentials, monkeypatch
 ) -> None:
-    """07-35 log: changevolume→100 alone = no eARC effect; restore KEY paths."""
+    """07-42 log: MQTT→LAN in ~15ms missed; ~80ms sometimes worked — enforce gap."""
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client._creds = proto_credentials.generate_dynamic_credentials(
         "aa:bb:cc:dd:ee:ff", timestamp=1
@@ -235,21 +235,34 @@ def test_volume_step_uses_sendkey_and_lan_not_changevolume_100(
     client.state.volume_type = None
     client._control_warmup = False
     client._last_remoter_ok_at = 10_000.0
+    client._last_volume_deliver_at = 0.0
     keys: list[str] = []
     calls: list[tuple] = []
+    pauses: list[float] = []
+    order: list[str] = []
 
     def publish_action(service, action, payload, *, as_key=False):
         calls.append((service, action, payload, as_key))
+        order.append(f"mqtt:{action}")
+
+    def local_key(host, key, **kwargs):
+        order.append(f"lan:{key}")
+        keys.append(key)
+        return 200
 
     monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
-    monkeypatch.setattr(
-        proto_client, "send_local_key", lambda host, key, **kwargs: keys.append(key) or 200
-    )
+    monkeypatch.setattr(proto_client, "send_local_key", local_key)
     monkeypatch.setattr(client, "_publish_action", publish_action)
-    assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
+    assert (
+        client._send_volume_step("KEY_VOLUMEUP", pause=lambda delay: pauses.append(delay))
+        is True
+    )
     assert keys == ["KEY_VOLUMEUP"]
     assert ("remote_service", "sendkey", "KEY_VOLUMEUP", True) in calls
     assert not any(action == "changevolume" for _s, action, _p, _k in calls)
+    assert order[0] == "mqtt:sendkey"
+    assert order[1] == "lan:KEY_VOLUMEUP"
+    assert any(p >= 0.3 for p in pauses)
 
 
 def test_volume_step_changevolume_only_when_level_known(

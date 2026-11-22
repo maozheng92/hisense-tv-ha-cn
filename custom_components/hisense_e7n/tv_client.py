@@ -32,6 +32,7 @@ from .const import (
     RC_TLS_FAILED,
     REMOTER_READY_POLL,
     REMOTER_READY_TIMEOUT,
+    VOLUME_CEC_GAP,
     VOLUME_KEY_IDLE_WARMUP,
     VOLUME_KEY_PAUSE,
     VOLUME_TYPE_ARC,
@@ -227,6 +228,7 @@ class HisenseTvClient:
         self._control_warmup = True
         self._volume_lock = threading.Lock()
         self._last_remoter_ok_at = 0.0
+        self._last_volume_deliver_at = 0.0
 
     @property
     def creds(self) -> MqttCredentials | None:
@@ -824,23 +826,18 @@ class HisenseTvClient:
         *,
         pause: Callable[[float], None] = time.sleep,
     ) -> bool:
-        """One media_player +/- step using KEY paths that the logs prove matter.
+        """One media_player +/- step with CEC-safe KEY spacing.
 
-        Compare HA logs:
+        HA log ``…07-42-26…`` (1.22.5, 5 presses / 2 heard on eARC): every
+        press logged identical ``MQTT sendkey`` then ``LAN KEY`` with HTTP 200.
+        The only measurable difference was the gap between those two delivers:
 
-        - ``…07-27-38…`` (partial eARC effect): ``KEY_VOLUMEUP`` accepted on
-          TCP 7778 — never ``changevolume``.
-        - ``…07-35-29…`` (zero eARC effect): only ``changevolume -> 100`` with
-          ``volume_type=None, was=None`` — TV ignored it completely.
+        - ~13–15ms MQTT→LAN: presses that user counted as misses
+        - ~77–93ms MQTT→LAN: the two that took effect
 
-        So ``changevolume→100`` alone is not a working protocol on this
-        ``$vidaa_common`` session. Restore KEY delivery:
-
-        1. MQTT ``remote_service/sendkey`` ``KEY_VOLUME*`` (CEC pass-through;
-           must not be skipped when LAN HTTP returns 200).
-        2. LAN ``KEY_VOLUME*`` on 7778/7779 (07-27 path).
-        3. Optional ``changevolume`` only when the level is known (never the
-           unknown→100 spam from 07-35).
+        So the TV/CEC path drops back-to-back KEY_VOLUME bursts. Keep both
+        channels from that log, but wait ``VOLUME_CEC_GAP`` between them, and
+        pace presses the same way. Never ``changevolume→100``.
 
         No ``VOLUME_SET`` slider.
         """
@@ -848,10 +845,15 @@ class HisenseTvClient:
         if name not in {KEY_VOLUMEUP, KEY_VOLUMEDOWN}:
             raise ValueError(f"not a volume key: {key}")
         delta = 1 if name == KEY_VOLUMEUP else -1
+        gap = max(0.0, float(VOLUME_CEC_GAP))
         with self._volume_lock:
+            since = time.monotonic() - self._last_volume_deliver_at
+            if gap and since < gap:
+                pause(gap - since)
+
             delivered = False
 
-            # 1) MQTT sendkey — missing from both prior logs; needed for CEC.
+            # 1) MQTT sendkey (CEC).
             try:
                 self._publish_action("remote_service", "sendkey", name, as_key=True)
                 delivered = True
@@ -859,8 +861,12 @@ class HisenseTvClient:
             except RuntimeError:
                 _LOGGER.debug("volume step MQTT sendkey failed", exc_info=True)
 
-            # 2) LAN remoter KEY — 07-27 path (HTTP ACK ≠ always CEC, but it
-            #    sometimes moved eARC; 07-35 removed this and got zero effect).
+            # Space channels — 07-42 failed when this was ~15ms.
+            if gap:
+                pause(gap)
+                _LOGGER.info("volume step CEC gap %.2fs before LAN", gap)
+
+            # 2) LAN remoter KEY after the gap (07-27 / 07-42 path).
             idle = time.monotonic() - self._last_remoter_ok_at
             if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
                 self._wait_for_remoter(pause=pause)
@@ -885,6 +891,7 @@ class HisenseTvClient:
                             self.state.volume_type,
                         )
 
+            self._last_volume_deliver_at = time.monotonic()
             if delivered:
                 self._note_volume_delta(delta)
                 return True
