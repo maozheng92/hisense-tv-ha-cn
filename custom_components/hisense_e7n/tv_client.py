@@ -829,7 +829,8 @@ class HisenseTvClient:
         """One media_player +/- step: a single LAN KEY_VOLUME, paced for CEC.
 
         User: MQTT cannot control volume — use LAN. Dual MQTT+LAN (15:51)
-        flooded CEC (2/8 heard). MQTT-only sendkey also did not move volume.
+        flooded CEC. 1.22.9 retried LAN when volumechange was silent; both
+        keys landed and volume jumped two steps — that retry is gone.
 
         1. Wait ``VOLUME_CEC_GAP`` since the last KEY (0.9s).
         2. Deliver **one** ``KEY_VOLUME*`` via LAN remoter (7778/7779).

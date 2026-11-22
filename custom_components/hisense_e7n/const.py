@@ -38,7 +38,7 @@ VOLUME_TYPE_MUTE = 2
 VOLUME_KEY_PAUSE = 0.05
 VOLUME_KEY_IDLE_WARMUP = 1.5
 # eARC CEC: one LAN KEY_VOLUME per press (MQTT sendkey does not move volume).
-# Dual MQTT+LAN (15:51) flooded CEC; keep a gap between LAN keys.
+# Dual MQTT+LAN (15:51) flooded CEC. 1.22.9 LAN retry jumped +2 — reverted.
 VOLUME_CEC_GAP = 0.9
 
 # When the current level is unknown, drive to 0 then climb (extra downs are no-ops).
