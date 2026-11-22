@@ -64,15 +64,54 @@ def format_key_sequence(keys: list[str] | None) -> str:
 
 
 def summarize_custom_sources(sources: list[dict[str, Any]] | None) -> str:
-    """One line per source for the manage-sources description."""
+    """One numbered line per source for the manage-sources description."""
     lines: list[str] = []
-    for item in sources or []:
+    for index, item in enumerate(sources or [], start=1):
         name = str(item.get("name") or "").strip()
         if not name:
             continue
         sequence = format_key_sequence(list(item.get("keys") or []))
-        lines.append(f"{name}: {sequence}" if sequence else name)
+        body = f"{name}: {sequence}" if sequence else name
+        lines.append(f"{index}. {body}")
     return "\n".join(lines) if lines else ""
+
+
+def move_custom_source(
+    sources: list[dict[str, Any]],
+    name: str,
+    *,
+    direction: str,
+    steps: int = 1,
+) -> list[dict[str, Any]]:
+    """Return a copy with ``name`` moved up or down by ``steps`` slots.
+
+    ``direction`` is ``move_up`` or ``move_down``. Raises ``ValueError`` when
+    the name is missing. Clamps at the ends of the list.
+    """
+    items = [dict(item) for item in sources]
+    needle = name.strip()
+    index = next(
+        (i for i, item in enumerate(items) if item.get("name") == needle),
+        None,
+    )
+    if index is None:
+        raise ValueError(f"unknown custom source: {name}")
+    try:
+        count = int(steps)
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"invalid move steps: {steps}") from err
+    count = max(1, count)
+    if direction == "move_up":
+        new_index = max(0, index - count)
+    elif direction == "move_down":
+        new_index = min(len(items) - 1, index + count)
+    else:
+        raise ValueError(f"invalid move direction: {direction}")
+    if new_index == index:
+        return items
+    item = items.pop(index)
+    items.insert(new_index, item)
+    return items
 
 
 def parse_custom_sources_text(text: str | None) -> list[dict[str, Any]]:

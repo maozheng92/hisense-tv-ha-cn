@@ -18,6 +18,9 @@ except ImportError:  # pragma: no cover - HA < 2024.4
 from homeassistant.helpers.selector import (
     EntitySelector,
     EntitySelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -36,6 +39,7 @@ from .const import (
     CONF_CUSTOM_SOURCES,
     CONF_MANAGE_ACTION,
     CONF_MANAGE_SOURCE,
+    CONF_MOVE_STEPS,
     CONF_POWER_ON_BUTTON,
     CONF_POWER_ON_COMMAND,
     CONF_POWER_ON_DEVICE,
@@ -44,27 +48,36 @@ from .const import (
     CONF_SEQUENCE_ACTION,
     CONF_SEQUENCE_BUTTON,
     CONF_SOURCE_KEY_DELAY,
+    CONF_SOURCE_NAME_ACTION,
     CONF_USE_SSL,
     DEFAULT_AUTH_MODE,
+    DEFAULT_MOVE_STEPS,
     DEFAULT_NAME,
     DEFAULT_PORT,
     DEFAULT_POWER_ON_COMMAND,
     DEFAULT_SOURCE_KEY_DELAY,
     DOMAIN,
+    LEGACY_SOURCE_KEY_DELAYS,
     MANAGE_ACTION_ADD,
     MANAGE_ACTION_EDIT,
     MANAGE_ACTION_FINISH,
+    MANAGE_ACTION_MOVE_DOWN,
+    MANAGE_ACTION_MOVE_UP,
     MANAGE_ACTION_REMOVE,
+    MAX_MOVE_STEPS,
     POWER_ON_MODE_BUTTON,
     SEQUENCE_ACTION_ADD,
     SEQUENCE_ACTION_CLEAR,
     SEQUENCE_ACTION_DONE,
     SEQUENCE_ACTION_UNDO,
+    SOURCE_NAME_ACTION_BACK,
+    SOURCE_NAME_ACTION_NEXT,
 )
 from .credentials import random_client_uuid
 from .custom_sources import (
     SEQUENCE_BUTTON_KEYS,
     format_key_sequence,
+    move_custom_source,
     normalize_custom_sources,
     summarize_custom_sources,
 )
@@ -110,16 +123,38 @@ SEQUENCE_ACTION_SELECTOR = SelectSelector(
         translation_key="sequence_action",
     )
 )
+# Explicit labels so 上移/下移 always show (translation_key alone was raw move_up).
 MANAGE_ACTION_SELECTOR = SelectSelector(
     SelectSelectorConfig(
         options=[
-            MANAGE_ACTION_ADD,
-            MANAGE_ACTION_EDIT,
-            MANAGE_ACTION_REMOVE,
-            MANAGE_ACTION_FINISH,
+            {"value": MANAGE_ACTION_ADD, "label": "添加输入源"},
+            {"value": MANAGE_ACTION_EDIT, "label": "编辑输入源"},
+            {"value": MANAGE_ACTION_REMOVE, "label": "删除输入源"},
+            {"value": MANAGE_ACTION_MOVE_UP, "label": "上移"},
+            {"value": MANAGE_ACTION_MOVE_DOWN, "label": "下移"},
+            {"value": MANAGE_ACTION_FINISH, "label": "保存并完成"},
         ],
         mode=SelectSelectorMode.DROPDOWN,
         translation_key="manage_action",
+    )
+)
+SOURCE_NAME_ACTION_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=[
+            {"value": SOURCE_NAME_ACTION_NEXT, "label": "下一步"},
+            {"value": SOURCE_NAME_ACTION_BACK, "label": "返回"},
+        ],
+        mode=SelectSelectorMode.DROPDOWN,
+        translation_key="source_name_action",
+    )
+)
+MOVE_STEPS_SELECTOR = NumberSelector(
+    NumberSelectorConfig(
+        min=1,
+        max=MAX_MOVE_STEPS,
+        step=1,
+        mode=NumberSelectorMode.BOX,
+        unit_of_measurement="位",
     )
 )
 
@@ -298,6 +333,8 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
             delay = DEFAULT_SOURCE_KEY_DELAY if value is None else float(value)
         except (TypeError, ValueError):
             delay = DEFAULT_SOURCE_KEY_DELAY
+        if any(abs(delay - legacy) < 1e-9 for legacy in LEGACY_SOURCE_KEY_DELAYS):
+            delay = DEFAULT_SOURCE_KEY_DELAY
         return max(0.0, min(5.0, delay))
 
     def _options_payload(
@@ -409,7 +446,17 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             )
+            fields[vol.Optional(CONF_MOVE_STEPS, default=DEFAULT_MOVE_STEPS)] = (
+                MOVE_STEPS_SELECTOR
+            )
         return vol.Schema(fields)
+
+    def _parse_move_steps(self, user_input: dict[str, Any]) -> int:
+        try:
+            steps = int(user_input.get(CONF_MOVE_STEPS, DEFAULT_MOVE_STEPS))
+        except (TypeError, ValueError):
+            steps = DEFAULT_MOVE_STEPS
+        return max(1, min(MAX_MOVE_STEPS, steps))
 
     async def async_step_custom_sources(
         self, user_input: dict[str, Any] | None = None
@@ -448,13 +495,24 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
                     errors[CONF_MANAGE_SOURCE] = "source_required"
                 elif action == MANAGE_ACTION_REMOVE:
                     self._sources.pop(index)
+                elif action in {MANAGE_ACTION_MOVE_UP, MANAGE_ACTION_MOVE_DOWN}:
+                    self._sources = move_custom_source(
+                        self._sources,
+                        picked,
+                        direction=action,
+                        steps=self._parse_move_steps(user_input),
+                    )
                 elif action == MANAGE_ACTION_EDIT:
                     item = self._sources[index]
                     self._edit_index = index
                     self._draft_name = str(item["name"])
                     self._draft_keys = list(item.get("keys") or [])
                     return await self.async_step_source_name()
-            if not errors and action == MANAGE_ACTION_REMOVE:
+            if not errors and action in {
+                MANAGE_ACTION_REMOVE,
+                MANAGE_ACTION_MOVE_UP,
+                MANAGE_ACTION_MOVE_DOWN,
+            }:
                 return await self.async_step_custom_sources()
 
         summary = summarize_custom_sources(self._sources) or "—"
@@ -470,6 +528,12 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            action = user_input.get(CONF_SOURCE_NAME_ACTION, SOURCE_NAME_ACTION_NEXT)
+            if action == SOURCE_NAME_ACTION_BACK:
+                self._draft_name = ""
+                self._draft_keys = []
+                self._edit_index = None
+                return await self.async_step_custom_sources()
             name = str(user_input.get(CONF_CUSTOM_SOURCE_NAME) or "").strip()
             if not name:
                 errors[CONF_CUSTOM_SOURCE_NAME] = "source_name_required"
@@ -490,6 +554,9 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(
                     CONF_CUSTOM_SOURCE_NAME, default=self._draft_name or ""
                 ): TextSelector(TextSelectorConfig(type="text")),
+                vol.Required(
+                    CONF_SOURCE_NAME_ACTION, default=SOURCE_NAME_ACTION_NEXT
+                ): SOURCE_NAME_ACTION_SELECTOR,
             }
         )
         return self.async_show_form(

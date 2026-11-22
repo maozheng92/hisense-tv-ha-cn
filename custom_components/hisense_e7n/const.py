@@ -28,7 +28,10 @@ CONF_BLE_ADDRESS = "ble_address"
 CONF_CUSTOM_SOURCES = "custom_sources"
 CONF_CUSTOM_SOURCES_TEXT = "custom_sources_text"
 CONF_SOURCE_KEY_DELAY = "source_key_delay"
-DEFAULT_SOURCE_KEY_DELAY = 0.5
+# Between-key gap in custom-source macros. Cold-start SOURCE wait/retry is separate.
+DEFAULT_SOURCE_KEY_DELAY = 0.1
+# Prior shipped defaults; migrate installs that never customized the gap.
+LEGACY_SOURCE_KEY_DELAYS = (0.5, 0.25)
 # After cold power-on, MQTT often comes up before the LAN remoter accepts
 # 信号源. Retry the local open a few times instead of raising the global gap.
 SOURCE_OPEN_RETRIES = 4
@@ -37,18 +40,26 @@ SOURCE_MENU_SETTLE = 0.75
 REMOTER_READY_TIMEOUT = 8.0
 REMOTER_READY_POLL = 0.4
 CONF_CUSTOM_SOURCE_NAME = "custom_source_name"
+CONF_SOURCE_NAME_ACTION = "source_name_action"
 CONF_SEQUENCE_BUTTON = "sequence_button"
 CONF_SEQUENCE_ACTION = "sequence_action"
 CONF_MANAGE_ACTION = "manage_action"
 CONF_MANAGE_SOURCE = "manage_source"
+CONF_MOVE_STEPS = "move_steps"
 SEQUENCE_ACTION_ADD = "add"
 SEQUENCE_ACTION_UNDO = "undo"
 SEQUENCE_ACTION_CLEAR = "clear"
 SEQUENCE_ACTION_DONE = "done"
+SOURCE_NAME_ACTION_NEXT = "next"
+SOURCE_NAME_ACTION_BACK = "back"
 MANAGE_ACTION_ADD = "add"
 MANAGE_ACTION_EDIT = "edit"
 MANAGE_ACTION_REMOVE = "remove"
+MANAGE_ACTION_MOVE_UP = "move_up"
+MANAGE_ACTION_MOVE_DOWN = "move_down"
 MANAGE_ACTION_FINISH = "finish"
+DEFAULT_MOVE_STEPS = 1
+MAX_MOVE_STEPS = 20
 
 AUTH_MODE_AUTO = "auto"
 AUTH_MODE_DYNAMIC = "dynamic"

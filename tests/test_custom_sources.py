@@ -68,10 +68,42 @@ def test_format_and_summarize_sequences(proto_custom_sources) -> None:
             {"name": "HDMI2", "keys": ["KEY_SOURCE", "KEY_RIGHT", "KEY_RIGHT", "KEY_OK"]},
         ]
     )
-    assert "HDMI1: source → right → ok" in summary
-    assert "HDMI2: source → right → right → ok" in summary
+    assert "1. HDMI1: source → right → ok" in summary
+    assert "2. HDMI2: source → right → right → ok" in summary
     assert "KEY_SOURCE" in proto_custom_sources.SEQUENCE_BUTTON_KEYS
     assert "KEY_RIGHT" in proto_custom_sources.SEQUENCE_BUTTON_KEYS
+
+
+def test_move_custom_source_reorders_list(proto_custom_sources) -> None:
+    sources = [
+        {"name": "HDMI1", "keys": ["KEY_SOURCE", "KEY_OK"]},
+        {"name": "HDMI2", "keys": ["KEY_SOURCE", "KEY_RIGHT", "KEY_OK"]},
+        {"name": "AV", "keys": ["KEY_SOURCE", "KEY_DOWN", "KEY_OK"]},
+    ]
+    down = proto_custom_sources.move_custom_source(
+        sources, "HDMI1", direction="move_down"
+    )
+    assert [item["name"] for item in down] == ["HDMI2", "HDMI1", "AV"]
+    up = proto_custom_sources.move_custom_source(down, "AV", direction="move_up")
+    assert [item["name"] for item in up] == ["HDMI2", "AV", "HDMI1"]
+    same = proto_custom_sources.move_custom_source(
+        up, "HDMI2", direction="move_up"
+    )
+    assert [item["name"] for item in same] == ["HDMI2", "AV", "HDMI1"]
+    jump = proto_custom_sources.move_custom_source(
+        sources, "HDMI1", direction="move_down", steps=2
+    )
+    assert [item["name"] for item in jump] == ["HDMI2", "AV", "HDMI1"]
+    clamped = proto_custom_sources.move_custom_source(
+        sources, "AV", direction="move_up", steps=99
+    )
+    assert [item["name"] for item in clamped] == ["AV", "HDMI1", "HDMI2"]
+
+
+def test_default_key_delay_is_snappier(proto_const) -> None:
+    assert proto_const.DEFAULT_SOURCE_KEY_DELAY == 0.1
+    assert 0.5 in proto_const.LEGACY_SOURCE_KEY_DELAYS
+    assert 0.25 in proto_const.LEGACY_SOURCE_KEY_DELAYS
 
 
 def test_run_key_sequence_pauses_between_keys(proto_client) -> None:
