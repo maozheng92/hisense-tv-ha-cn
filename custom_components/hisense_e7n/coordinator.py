@@ -18,7 +18,7 @@ from .const import (
     DEFAULT_POWER_ON_COMMAND,
     DEFAULT_SOURCE_KEY_DELAY,
     DOMAIN,
-    LEGACY_SOURCE_KEY_DELAY,
+    LEGACY_SOURCE_KEY_DELAYS,
     POWER_ON_MODE_WOL,
 )
 from .custom_sources import normalize_custom_sources
@@ -92,8 +92,8 @@ class HisenseTvCoordinator(DataUpdateCoordinator[TvState]):
             wait = DEFAULT_SOURCE_KEY_DELAY if delay is None else float(delay)
         except (TypeError, ValueError):
             wait = DEFAULT_SOURCE_KEY_DELAY
-        # Old shipped default (0.5s) felt sluggish between RIGHT/OK presses.
-        if abs(wait - LEGACY_SOURCE_KEY_DELAY) < 1e-9:
+        # Prior shipped defaults felt sluggish between RIGHT/OK presses.
+        if any(abs(wait - legacy) < 1e-9 for legacy in LEGACY_SOURCE_KEY_DELAYS):
             wait = DEFAULT_SOURCE_KEY_DELAY
         self.source_key_delay = max(0.0, min(5.0, wait))
 

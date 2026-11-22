@@ -57,7 +57,7 @@ from .const import (
     DEFAULT_POWER_ON_COMMAND,
     DEFAULT_SOURCE_KEY_DELAY,
     DOMAIN,
-    LEGACY_SOURCE_KEY_DELAY,
+    LEGACY_SOURCE_KEY_DELAYS,
     MANAGE_ACTION_ADD,
     MANAGE_ACTION_EDIT,
     MANAGE_ACTION_FINISH,
@@ -333,7 +333,7 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
             delay = DEFAULT_SOURCE_KEY_DELAY if value is None else float(value)
         except (TypeError, ValueError):
             delay = DEFAULT_SOURCE_KEY_DELAY
-        if abs(delay - LEGACY_SOURCE_KEY_DELAY) < 1e-9:
+        if any(abs(delay - legacy) < 1e-9 for legacy in LEGACY_SOURCE_KEY_DELAYS):
             delay = DEFAULT_SOURCE_KEY_DELAY
         return max(0.0, min(5.0, delay))
 

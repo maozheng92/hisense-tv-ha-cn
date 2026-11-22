@@ -101,8 +101,9 @@ def test_move_custom_source_reorders_list(proto_custom_sources) -> None:
 
 
 def test_default_key_delay_is_snappier(proto_const) -> None:
-    assert proto_const.DEFAULT_SOURCE_KEY_DELAY == 0.25
-    assert proto_const.LEGACY_SOURCE_KEY_DELAY == 0.5
+    assert proto_const.DEFAULT_SOURCE_KEY_DELAY == 0.1
+    assert 0.5 in proto_const.LEGACY_SOURCE_KEY_DELAYS
+    assert 0.25 in proto_const.LEGACY_SOURCE_KEY_DELAYS
 
 
 def test_run_key_sequence_pauses_between_keys(proto_client) -> None:

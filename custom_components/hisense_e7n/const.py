@@ -29,8 +29,9 @@ CONF_CUSTOM_SOURCES = "custom_sources"
 CONF_CUSTOM_SOURCES_TEXT = "custom_sources_text"
 CONF_SOURCE_KEY_DELAY = "source_key_delay"
 # Between-key gap in custom-source macros. Cold-start SOURCE wait/retry is separate.
-DEFAULT_SOURCE_KEY_DELAY = 0.25
-LEGACY_SOURCE_KEY_DELAY = 0.5
+DEFAULT_SOURCE_KEY_DELAY = 0.1
+# Prior shipped defaults; migrate installs that never customized the gap.
+LEGACY_SOURCE_KEY_DELAYS = (0.5, 0.25)
 CONF_CUSTOM_SOURCE_NAME = "custom_source_name"
 CONF_SOURCE_NAME_ACTION = "source_name_action"
 CONF_SEQUENCE_BUTTON = "sequence_button"
