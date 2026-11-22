@@ -21,7 +21,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .apps import format_app_title
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import HisenseTvCoordinator
-from .custom_sources import find_custom_source
+from .custom_sources import find_custom_source, match_source_name
 from .entity import HisenseTvEntity
 from .keys import (
     KEY_CHANNELDOWN,
@@ -110,7 +110,16 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
     @property
     def source(self) -> str | None:
         tv = self.coordinator.data or self.coordinator.client.state
-        return tv.source_name
+        reported = tv.source_name
+        custom_names = [
+            str(item["name"])
+            for item in self.coordinator.custom_sources
+            if item.get("name")
+        ]
+        matched = match_source_name(reported, custom_names)
+        if matched:
+            return matched
+        return match_source_name(reported, self.source_list or []) or reported
 
     @property
     def source_list(self) -> list[str] | None:
@@ -171,12 +180,15 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             await self.coordinator.client.async_run_key_sequence(
                 list(custom["keys"]),
                 delay=self.coordinator.source_key_delay,
+                source_name=source,
             )
+            self.async_write_ha_state()
             return
         tv = self.coordinator.client.state
         for item in tv.sources:
             if item.get("name") == source:
                 await self.coordinator.client.async_change_source(item["id"], source)
+                self.async_write_ha_state()
                 return
         for app in tv.apps:
             name = app.get("name")
@@ -190,8 +202,10 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
                     int(app.get("store_type") or 0),
                     str(app["package"]) if app.get("package") else None,
                 )
+                self.async_write_ha_state()
                 return
         await self.coordinator.client.async_launch_app(source)
+        self.async_write_ha_state()
 
     async def async_launch_app_service(self, name: str, url: str | None = None) -> None:
         await self.coordinator.client.async_launch_app(name, url)

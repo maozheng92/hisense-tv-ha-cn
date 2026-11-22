@@ -74,6 +74,15 @@ def test_format_and_summarize_sequences(proto_custom_sources) -> None:
     assert "KEY_RIGHT" in proto_custom_sources.SEQUENCE_BUTTON_KEYS
 
 
+def test_match_source_name_normalizes_hdmi(proto_custom_sources) -> None:
+    names = ["HDMI1", "HDMI2", "机顶盒"]
+    assert proto_custom_sources.match_source_name("HDMI 1", names) == "HDMI1"
+    assert proto_custom_sources.match_source_name("hdmi_2", names) == "HDMI2"
+    assert proto_custom_sources.match_source_name("机顶盒", names) == "机顶盒"
+    assert proto_custom_sources.match_source_name("USB", names) is None
+    assert proto_custom_sources.match_source_name(None, names) is None
+
+
 def test_run_key_sequence_pauses_between_keys(proto_client) -> None:
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     sent: list[str] = []

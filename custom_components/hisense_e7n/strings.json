@@ -12,8 +12,8 @@
           "power_on_remote": "Infrared remote",
           "power_on_command": "IR command",
           "power_on_device": "IR device name",
-          "volume_up_button": "Volume up button",
-          "volume_down_button": "Volume down button",
+          "volume_up_button": "音量加按钮",
+          "volume_down_button": "音量减按钮",
           "mac": "TV Wi-Fi MAC",
           "name": "Name",
           "auth_mode": "Auth mode",
@@ -27,8 +27,8 @@
           "power_on_remote": "A remote entity (Broadlink, ESPHome, Harmony). Used when power on is Infrared remote.",
           "power_on_command": "Command name stored on that remote, for example power or TV_POWER. Sent as remote.send_command.",
           "power_on_device": "Optional device name, only for remotes that need it (Harmony).",
-          "volume_up_button": "Optional. When set, media_player volume + presses this button/switch/script instead of LAN KEY_VOLUMEUP.",
-          "volume_down_button": "Optional. When set, media_player volume − presses this button/switch/script instead of LAN KEY_VOLUMEDOWN.",
+          "volume_up_button": "可选。填写后，媒体播放器音量加会按下这个按钮/开关/脚本，不再发电视 LAN 键。",
+          "volume_down_button": "可选。填写后，媒体播放器音量减会按下这个按钮/开关/脚本，不再发电视 LAN 键。",
           "mac": "Optional. Wi-Fi MAC for Wake-on-LAN only. It is not the remote identity, and it is not a Bluetooth address.",
           "auth_mode": "auto tries modern VIDAA credentials first, then legacy static login.",
           "client_cert": "Leave empty to use a generated stand-in cert. If MQTT rc=5, extract the VIDAA/爱家 client cert (see docs)."
@@ -68,8 +68,8 @@
           "power_on_remote": "Infrared remote",
           "power_on_command": "IR command",
           "power_on_device": "IR device name",
-          "volume_up_button": "Volume up button",
-          "volume_down_button": "Volume down button",
+          "volume_up_button": "音量加按钮",
+          "volume_down_button": "音量减按钮",
           "mac": "TV Wi-Fi MAC",
           "name": "Name",
           "source_key_delay": "Pause between keys (seconds)"
@@ -80,8 +80,8 @@
           "power_on_remote": "remote entity used when the mode is Infrared remote.",
           "power_on_command": "IR command name, for example power.",
           "power_on_device": "Optional Harmony device name.",
-          "volume_up_button": "Optional. Volume + presses this entity instead of the TV LAN key.",
-          "volume_down_button": "Optional. Volume − presses this entity instead of the TV LAN key.",
+          "volume_up_button": "可选。音量加会按下这个实体，不再发电视 LAN 键。",
+          "volume_down_button": "可选。音量减会按下这个实体，不再发电视 LAN 键。",
           "mac": "Wi-Fi MAC for Wake-on-LAN. Required when the mode is Wake-on-LAN.",
           "source_key_delay": "Wait this long between remoter keys in a custom input sequence. Default 0.5."
         }

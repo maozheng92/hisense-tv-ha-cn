@@ -75,6 +75,7 @@ def test_pair_topic_and_subscriptions_are_concrete(proto_client, proto_credentia
     subs = proto_topics.subscription_topics(creds)
     assert not any(item.endswith("#") or "/+" in item for item in subs)
     assert "/remoteapp/mobile/broadcast/ui_service/state" in subs
+    assert "/remoteapp/mobile/broadcast/ui_service/data/sourcelist" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep" in subs
 
 
@@ -92,6 +93,7 @@ def test_volume_and_source_parsing(proto_client) -> None:
     client._apply_state({"statetype": "remote_launcher", "sourcename": "HDMI1"})
     assert client.state.power_on is True
     assert client.state.statetype == "remote_launcher"
+    assert client.state.source_name == "HDMI1"
 
 
 def test_token_issuance_replaces_the_pairing_secret(proto_client) -> None:
@@ -386,3 +388,77 @@ def test_set_volume_steps_via_keys(proto_client, proto_credentials, monkeypatch)
     assert keys == ["KEY_VOLUMEUP", "KEY_VOLUMEUP", "KEY_VOLUMEUP"]
     assert not any(action in {"sendkey", "changevolume"} for _s, action, _p, _k in calls)
     assert client.state.volume == 13
+
+
+def test_source_state_from_nested_payload_and_sourcelist(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client._apply_state(
+        {
+            "statetype": "sourceswitch",
+            "source": {"sourcename": "HDMI 2", "sourceid": "4"},
+        }
+    )
+    assert client.state.source_name == "HDMI 2"
+    assert client.state.source_id == "4"
+    client._apply_state({"statetype": "hdmi", "name": "HDMI1"})
+    assert client.state.source_name == "HDMI1"
+    client._apply_sources(
+        {
+            "source_list": [
+                {"sourceid": "3", "sourcename": "HDMI1", "iscurrent": 1},
+                {"sourceid": "0", "sourcename": "TV"},
+            ]
+        }
+    )
+    assert client.state.source_name == "HDMI1"
+    assert client.state.source_id == "3"
+    client._handle_message(
+        "/remoteapp/mobile/x/ui_service/data/gettvstate",
+        b'{"statetype":"sourceswitch","sourcename":"HDMI 1","sourceid":"5"}',
+    )
+    assert client.state.source_name == "HDMI 1"
+    assert client.state.source_id == "5"
+
+
+def test_refresh_status_requests_sourcelist(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    calls: list[tuple[str, str]] = []
+
+    def publish_action(service, action, payload="", *, as_key=False):
+        calls.append((service, action))
+
+    client._publish_action = publish_action  # type: ignore[method-assign]
+    client.refresh_apps = lambda: calls.append(("ui_service", "applist"))  # type: ignore[method-assign]
+    client.refresh_status()
+    assert ("ui_service", "gettvstate") in calls
+    assert ("ui_service", "sourcelist") in calls
+    assert ("platform_service", "getvolume") in calls
+
+
+def test_change_source_notes_name_and_refreshes(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    calls: list[str] = []
+
+    def publish_action(service, action, payload="", *, as_key=False):
+        calls.append(action)
+
+    client._publish_action = publish_action  # type: ignore[method-assign]
+    client.change_source("4", "HDMI2")
+    assert client.state.source_name == "HDMI2"
+    assert client.state.source_id == "4"
+    assert "changesource" in calls
+    assert "gettvstate" in calls
+    assert "sourcelist" in calls
+
+
+def test_run_key_sequence_notes_custom_source(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.send_key = lambda key: None  # type: ignore[method-assign]
+    client._publish_action = lambda *a, **k: None  # type: ignore[method-assign]
+    client.run_key_sequence(
+        ["KEY_SOURCE", "KEY_OK"],
+        delay=0,
+        pause=lambda _delay: None,
+        source_name="HDMI1",
+    )
+    assert client.state.source_name == "HDMI1"
