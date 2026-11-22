@@ -81,11 +81,12 @@ def move_custom_source(
     name: str,
     *,
     direction: str,
+    steps: int = 1,
 ) -> list[dict[str, Any]]:
-    """Return a copy with ``name`` moved up or down one slot.
+    """Return a copy with ``name`` moved up or down by ``steps`` slots.
 
     ``direction`` is ``move_up`` or ``move_down``. Raises ``ValueError`` when
-    the name is missing. No-op (same order) at the ends of the list.
+    the name is missing. Clamps at the ends of the list.
     """
     items = [dict(item) for item in sources]
     needle = name.strip()
@@ -95,17 +96,22 @@ def move_custom_source(
     )
     if index is None:
         raise ValueError(f"unknown custom source: {name}")
+    try:
+        count = int(steps)
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"invalid move steps: {steps}") from err
+    count = max(1, count)
     if direction == "move_up":
-        if index == 0:
-            return items
-        items[index - 1], items[index] = items[index], items[index - 1]
+        new_index = max(0, index - count)
+    elif direction == "move_down":
+        new_index = min(len(items) - 1, index + count)
+    else:
+        raise ValueError(f"invalid move direction: {direction}")
+    if new_index == index:
         return items
-    if direction == "move_down":
-        if index >= len(items) - 1:
-            return items
-        items[index + 1], items[index] = items[index], items[index + 1]
-        return items
-    raise ValueError(f"invalid move direction: {direction}")
+    item = items.pop(index)
+    items.insert(new_index, item)
+    return items
 
 
 def parse_custom_sources_text(text: str | None) -> list[dict[str, Any]]:

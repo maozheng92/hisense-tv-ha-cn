@@ -79,21 +79,24 @@
       },
       "custom_sources": {
         "title": "自定义输入源",
-        "description": "当前输入源（媒体播放器与按钮按此顺序）：\n{sources}\n\n先起名，再按顺序点选遥控 button（例如 信号源 → 右 → OK）。用「上移 / 下移」调整顺序。",
+        "description": "当前输入源（媒体播放器与按钮按此顺序）：\n{sources}\n\n先起名，再按顺序点选遥控 button（例如 信号源 → 右 → OK）。选「上移 / 下移」并填写上移或下移几位。",
         "data": {
           "manage_action": "操作",
-          "manage_source": "输入源"
+          "manage_source": "输入源",
+          "move_steps": "上移/下移几位"
         },
         "data_description": {
           "manage_action": "添加、编辑、删除、调整顺序，或保存并完成。",
-          "manage_source": "编辑、删除或调整顺序时必选。"
+          "manage_source": "编辑、删除或调整顺序时必选。",
+          "move_steps": "上移或下移时移动的位数；其他操作可忽略。"
         }
       },
       "source_name": {
         "title": "输入源名称",
-        "description": "给这个输入源起名（例如 HDMI1）。下一步再选择切换它要用的遥控 button。",
+        "description": "给这个输入源起名（例如 HDMI1）。选「下一步」去选遥控 button，或选「返回」回到列表。",
         "data": {
-          "custom_source_name": "名称"
+          "custom_source_name": "名称",
+          "source_name_action": "操作"
         }
       },
       "source_buttons": {
@@ -187,6 +190,12 @@
         "move_up": "上移",
         "move_down": "下移",
         "finish": "保存并完成"
+      }
+    },
+    "source_name_action": {
+      "options": {
+        "next": "下一步",
+        "back": "返回"
       }
     },
     "sequence_action": {

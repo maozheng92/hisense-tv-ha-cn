@@ -79,21 +79,24 @@
       },
       "custom_sources": {
         "title": "Custom inputs",
-        "description": "Current inputs (media player and buttons use this order):\n{sources}\n\nAdd a name first, then pick remoter buttons in order (source → right → ok). Use Move up / Move down to reorder.",
+        "description": "Current inputs (media player and buttons use this order):\n{sources}\n\nAdd a name first, then pick remoter buttons in order (source → right → ok). Use 上移 / 下移 with a step count to reorder.",
         "data": {
           "manage_action": "Action",
-          "manage_source": "Input"
+          "manage_source": "Input",
+          "move_steps": "Move by (positions)"
         },
         "data_description": {
           "manage_action": "Add, edit, remove, reorder, or finish and save.",
-          "manage_source": "Required when editing, removing, or reordering."
+          "manage_source": "Required when editing, removing, or reordering.",
+          "move_steps": "How many positions to 上移 or 下移. Ignored for other actions."
         }
       },
       "source_name": {
         "title": "Input name",
-        "description": "Name this input (for example HDMI1). Next you will pick the remoter buttons used to switch to it.",
+        "description": "Name this input (for example HDMI1). Choose 下一步 to pick remoter buttons, or 返回 to go back to the list.",
         "data": {
-          "custom_source_name": "Name"
+          "custom_source_name": "Name",
+          "source_name_action": "Action"
         }
       },
       "source_buttons": {
@@ -155,12 +158,18 @@
     },
     "manage_action": {
       "options": {
-        "add": "Add input",
-        "edit": "Edit input",
-        "remove": "Remove input",
-        "move_up": "Move up",
-        "move_down": "Move down",
-        "finish": "Save and finish"
+        "add": "添加输入源",
+        "edit": "编辑输入源",
+        "remove": "删除输入源",
+        "move_up": "上移",
+        "move_down": "下移",
+        "finish": "保存并完成"
+      }
+    },
+    "source_name_action": {
+      "options": {
+        "next": "下一步",
+        "back": "返回"
       }
     },
     "sequence_action": {

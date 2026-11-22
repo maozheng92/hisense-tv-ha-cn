@@ -90,6 +90,14 @@ def test_move_custom_source_reorders_list(proto_custom_sources) -> None:
         up, "HDMI2", direction="move_up"
     )
     assert [item["name"] for item in same] == ["HDMI2", "AV", "HDMI1"]
+    jump = proto_custom_sources.move_custom_source(
+        sources, "HDMI1", direction="move_down", steps=2
+    )
+    assert [item["name"] for item in jump] == ["HDMI2", "AV", "HDMI1"]
+    clamped = proto_custom_sources.move_custom_source(
+        sources, "AV", direction="move_up", steps=99
+    )
+    assert [item["name"] for item in clamped] == ["AV", "HDMI1", "HDMI2"]
 
 
 def test_default_key_delay_is_snappier(proto_const) -> None:
