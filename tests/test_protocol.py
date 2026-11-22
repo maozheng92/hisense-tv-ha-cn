@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 
 def test_key_aliases_match_aijia(proto_keys) -> None:
     assert proto_keys.normalize_key("power") == proto_keys.KEY_POWER
@@ -223,71 +225,49 @@ def test_wol_packet_shape(proto_client, monkeypatch) -> None:
     assert addr[1] == 9
 
 
-def test_volume_step_spaces_mqtt_and_lan_for_cec(
+def test_volume_step_single_mqtt_sendkey_no_lan(
     proto_client, proto_credentials, monkeypatch
 ) -> None:
-    """07-42 log: MQTT→LAN in ~15ms missed; ~80ms sometimes worked — enforce gap."""
+    """15:51 log: dual MQTT+LAN every 0.35s flooded CEC — one KEY only."""
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client._creds = proto_credentials.generate_dynamic_credentials(
         "aa:bb:cc:dd:ee:ff", timestamp=1
     )
     client.state.volume = None
     client.state.volume_type = None
-    client._control_warmup = False
-    client._last_remoter_ok_at = 10_000.0
     client._last_volume_deliver_at = 0.0
     keys: list[str] = []
     calls: list[tuple] = []
-    pauses: list[float] = []
-    order: list[str] = []
 
     def publish_action(service, action, payload, *, as_key=False):
         calls.append((service, action, payload, as_key))
-        order.append(f"mqtt:{action}")
 
-    def local_key(host, key, **kwargs):
-        order.append(f"lan:{key}")
-        keys.append(key)
-        return 200
-
-    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
-    monkeypatch.setattr(proto_client, "send_local_key", local_key)
-    monkeypatch.setattr(client, "_publish_action", publish_action)
-    assert (
-        client._send_volume_step("KEY_VOLUMEUP", pause=lambda delay: pauses.append(delay))
-        is True
+    monkeypatch.setattr(
+        proto_client, "send_local_key", lambda host, key, **kwargs: keys.append(key) or 200
     )
-    assert keys == ["KEY_VOLUMEUP"]
-    assert ("remote_service", "sendkey", "KEY_VOLUMEUP", True) in calls
-    assert not any(action == "changevolume" for _s, action, _p, _k in calls)
-    assert order[0] == "mqtt:sendkey"
-    assert order[1] == "lan:KEY_VOLUMEUP"
-    assert any(p >= 0.3 for p in pauses)
+    monkeypatch.setattr(client, "_publish_action", publish_action)
+    assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
+    assert keys == []
+    assert calls == [("remote_service", "sendkey", "KEY_VOLUMEUP", True)]
 
 
-def test_volume_step_changevolume_only_when_level_known(
+def test_volume_step_paces_between_presses(
     proto_client, proto_credentials, monkeypatch
 ) -> None:
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client._creds = proto_credentials.generate_dynamic_credentials(
         "aa:bb:cc:dd:ee:ff", timestamp=1
     )
-    client.state.volume = 11
-    client.state.volume_type = 1
-    client._control_warmup = False
-    client._last_remoter_ok_at = 10_000.0
-    calls: list[tuple] = []
+    client._last_volume_deliver_at = time.monotonic()
+    pauses: list[float] = []
 
-    def publish_action(service, action, payload, *, as_key=False):
-        calls.append((service, action, payload, as_key))
-
-    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
-    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: 200)
-    monkeypatch.setattr(client, "_publish_action", publish_action)
-    assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
-    assert ("remote_service", "sendkey", "KEY_VOLUMEUP", True) in calls
-    assert ("platform_service", "changevolume", "12", False) in calls
-    assert client.state.volume == 12
+    monkeypatch.setattr(client, "_publish_action", lambda *a, **k: None)
+    monkeypatch.setattr(proto_client, "send_local_key", lambda *a, **k: 200)
+    assert (
+        client._send_volume_step("KEY_VOLUMEUP", pause=lambda delay: pauses.append(delay))
+        is True
+    )
+    assert any(p >= 0.5 for p in pauses)
 
 
 def test_volume_step_lan_alone_when_mqtt_down(proto_client, monkeypatch) -> None:
@@ -296,6 +276,7 @@ def test_volume_step_lan_alone_when_mqtt_down(proto_client, monkeypatch) -> None
     client.state.volume_type = 0
     client._control_warmup = False
     client._last_remoter_ok_at = 10_000.0
+    client._last_volume_deliver_at = 0.0
     keys: list[str] = []
 
     def publish_action(service, action, payload, *, as_key=False):
@@ -320,16 +301,15 @@ def test_set_volume_steps_via_keys(proto_client, proto_credentials, monkeypatch)
     client.state.volume_type = 0
     client._control_warmup = False
     client._last_remoter_ok_at = 10_000.0
-    keys: list[str] = []
+    client._last_volume_deliver_at = 0.0
+    sendkeys: list[str] = []
 
     def publish_action(service, action, payload, *, as_key=False):
-        return None
+        if action == "sendkey":
+            sendkeys.append(str(payload))
 
     monkeypatch.setattr(client, "_publish_action", publish_action)
-    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
-    monkeypatch.setattr(
-        proto_client, "send_local_key", lambda host, key, **kwargs: keys.append(key) or 200
-    )
+    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: 200)
     client.set_volume(13, pause=lambda _delay: None)
-    assert keys == ["KEY_VOLUMEUP", "KEY_VOLUMEUP", "KEY_VOLUMEUP"]
+    assert sendkeys == ["KEY_VOLUMEUP", "KEY_VOLUMEUP", "KEY_VOLUMEUP"]
     assert client.state.volume == 13
