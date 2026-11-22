@@ -51,9 +51,12 @@ from .const import (
     DEFAULT_POWER_ON_COMMAND,
     DEFAULT_SOURCE_KEY_DELAY,
     DOMAIN,
+    LEGACY_SOURCE_KEY_DELAY,
     MANAGE_ACTION_ADD,
     MANAGE_ACTION_EDIT,
     MANAGE_ACTION_FINISH,
+    MANAGE_ACTION_MOVE_DOWN,
+    MANAGE_ACTION_MOVE_UP,
     MANAGE_ACTION_REMOVE,
     POWER_ON_MODE_BUTTON,
     SEQUENCE_ACTION_ADD,
@@ -65,6 +68,7 @@ from .credentials import random_client_uuid
 from .custom_sources import (
     SEQUENCE_BUTTON_KEYS,
     format_key_sequence,
+    move_custom_source,
     normalize_custom_sources,
     summarize_custom_sources,
 )
@@ -116,6 +120,8 @@ MANAGE_ACTION_SELECTOR = SelectSelector(
             MANAGE_ACTION_ADD,
             MANAGE_ACTION_EDIT,
             MANAGE_ACTION_REMOVE,
+            MANAGE_ACTION_MOVE_UP,
+            MANAGE_ACTION_MOVE_DOWN,
             MANAGE_ACTION_FINISH,
         ],
         mode=SelectSelectorMode.DROPDOWN,
@@ -298,6 +304,8 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
             delay = DEFAULT_SOURCE_KEY_DELAY if value is None else float(value)
         except (TypeError, ValueError):
             delay = DEFAULT_SOURCE_KEY_DELAY
+        if abs(delay - LEGACY_SOURCE_KEY_DELAY) < 1e-9:
+            delay = DEFAULT_SOURCE_KEY_DELAY
         return max(0.0, min(5.0, delay))
 
     def _options_payload(
@@ -448,13 +456,21 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
                     errors[CONF_MANAGE_SOURCE] = "source_required"
                 elif action == MANAGE_ACTION_REMOVE:
                     self._sources.pop(index)
+                elif action in {MANAGE_ACTION_MOVE_UP, MANAGE_ACTION_MOVE_DOWN}:
+                    self._sources = move_custom_source(
+                        self._sources, picked, direction=action
+                    )
                 elif action == MANAGE_ACTION_EDIT:
                     item = self._sources[index]
                     self._edit_index = index
                     self._draft_name = str(item["name"])
                     self._draft_keys = list(item.get("keys") or [])
                     return await self.async_step_source_name()
-            if not errors and action == MANAGE_ACTION_REMOVE:
+            if not errors and action in {
+                MANAGE_ACTION_REMOVE,
+                MANAGE_ACTION_MOVE_UP,
+                MANAGE_ACTION_MOVE_DOWN,
+            }:
                 return await self.async_step_custom_sources()
 
         summary = summarize_custom_sources(self._sources) or "—"

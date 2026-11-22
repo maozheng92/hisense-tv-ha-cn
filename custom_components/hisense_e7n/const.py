@@ -28,7 +28,9 @@ CONF_BLE_ADDRESS = "ble_address"
 CONF_CUSTOM_SOURCES = "custom_sources"
 CONF_CUSTOM_SOURCES_TEXT = "custom_sources_text"
 CONF_SOURCE_KEY_DELAY = "source_key_delay"
-DEFAULT_SOURCE_KEY_DELAY = 0.5
+# Between-key gap in custom-source macros. Cold-start SOURCE wait/retry is separate.
+DEFAULT_SOURCE_KEY_DELAY = 0.25
+LEGACY_SOURCE_KEY_DELAY = 0.5
 CONF_CUSTOM_SOURCE_NAME = "custom_source_name"
 CONF_SEQUENCE_BUTTON = "sequence_button"
 CONF_SEQUENCE_ACTION = "sequence_action"
@@ -41,6 +43,8 @@ SEQUENCE_ACTION_DONE = "done"
 MANAGE_ACTION_ADD = "add"
 MANAGE_ACTION_EDIT = "edit"
 MANAGE_ACTION_REMOVE = "remove"
+MANAGE_ACTION_MOVE_UP = "move_up"
+MANAGE_ACTION_MOVE_DOWN = "move_down"
 MANAGE_ACTION_FINISH = "finish"
 
 AUTH_MODE_AUTO = "auto"

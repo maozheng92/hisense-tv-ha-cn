@@ -64,15 +64,48 @@ def format_key_sequence(keys: list[str] | None) -> str:
 
 
 def summarize_custom_sources(sources: list[dict[str, Any]] | None) -> str:
-    """One line per source for the manage-sources description."""
+    """One numbered line per source for the manage-sources description."""
     lines: list[str] = []
-    for item in sources or []:
+    for index, item in enumerate(sources or [], start=1):
         name = str(item.get("name") or "").strip()
         if not name:
             continue
         sequence = format_key_sequence(list(item.get("keys") or []))
-        lines.append(f"{name}: {sequence}" if sequence else name)
+        body = f"{name}: {sequence}" if sequence else name
+        lines.append(f"{index}. {body}")
     return "\n".join(lines) if lines else ""
+
+
+def move_custom_source(
+    sources: list[dict[str, Any]],
+    name: str,
+    *,
+    direction: str,
+) -> list[dict[str, Any]]:
+    """Return a copy with ``name`` moved up or down one slot.
+
+    ``direction`` is ``move_up`` or ``move_down``. Raises ``ValueError`` when
+    the name is missing. No-op (same order) at the ends of the list.
+    """
+    items = [dict(item) for item in sources]
+    needle = name.strip()
+    index = next(
+        (i for i, item in enumerate(items) if item.get("name") == needle),
+        None,
+    )
+    if index is None:
+        raise ValueError(f"unknown custom source: {name}")
+    if direction == "move_up":
+        if index == 0:
+            return items
+        items[index - 1], items[index] = items[index], items[index - 1]
+        return items
+    if direction == "move_down":
+        if index >= len(items) - 1:
+            return items
+        items[index + 1], items[index] = items[index], items[index + 1]
+        return items
+    raise ValueError(f"invalid move direction: {direction}")
 
 
 def parse_custom_sources_text(text: str | None) -> list[dict[str, Any]]:

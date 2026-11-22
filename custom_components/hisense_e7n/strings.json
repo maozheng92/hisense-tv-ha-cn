@@ -74,19 +74,19 @@
           "power_on_command": "IR command name, for example power.",
           "power_on_device": "Optional Harmony device name.",
           "mac": "Wi-Fi MAC for Wake-on-LAN. Required when the mode is Wake-on-LAN.",
-          "source_key_delay": "Wait this long between remoter keys in a custom input sequence. Default 0.5."
+          "source_key_delay": "Wait this long between remoter keys in a custom input sequence. Default 0.25. Separate from the cold-start wait that opens Source."
         }
       },
       "custom_sources": {
         "title": "Custom inputs",
-        "description": "Current inputs:\n{sources}\n\nAdd a name first, then pick remoter buttons in order (source → right → ok). Each input becomes a media_player source and a button.",
+        "description": "Current inputs (media player and buttons use this order):\n{sources}\n\nAdd a name first, then pick remoter buttons in order (source → right → ok). Use Move up / Move down to reorder.",
         "data": {
           "manage_action": "Action",
           "manage_source": "Input"
         },
         "data_description": {
-          "manage_action": "Add a new input, edit/remove an existing one, or finish and save.",
-          "manage_source": "Required when editing or removing."
+          "manage_action": "Add, edit, remove, reorder, or finish and save.",
+          "manage_source": "Required when editing, removing, or reordering."
         }
       },
       "source_name": {
@@ -108,7 +108,7 @@
     "error": {
       "cannot_connect_ble": "Invalid or unreachable TV Bluetooth address. Enable Bluetooth on the Home Assistant host and retry.",
       "power_on_required": "This power-on method needs the matching entity, IR command, or Wi-Fi MAC.",
-      "source_required": "Pick which input to edit or remove.",
+      "source_required": "Pick which input to edit, remove, or reorder.",
       "source_name_required": "Enter a name for this input.",
       "source_name_duplicate": "That input name is already used.",
       "sequence_button_required": "Pick a remoter button to add.",
@@ -158,6 +158,8 @@
         "add": "Add input",
         "edit": "Edit input",
         "remove": "Remove input",
+        "move_up": "Move up",
+        "move_down": "Move down",
         "finish": "Save and finish"
       }
     },
