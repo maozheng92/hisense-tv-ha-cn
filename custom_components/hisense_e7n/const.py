@@ -37,9 +37,12 @@ VOLUME_TYPE_MUTE = 2
 # TV-speaker KEY_VOLUME* pacing (not a substitute for ARC CEC volume).
 VOLUME_KEY_PAUSE = 0.05
 VOLUME_KEY_IDLE_WARMUP = 1.5
-# eARC CEC: one LAN KEY_VOLUME per press (MQTT sendkey does not move volume).
-# Dual MQTT+LAN (15:51) flooded CEC; keep a gap between LAN keys.
-VOLUME_CEC_GAP = 0.9
+# eARC CEC: LAN KEY_VOLUME only (MQTT sendkey does not move volume).
+# Dual MQTT+LAN (15:51) flooded CEC. 08-15: 11× LAN HTTP 200, some still
+# unheard — TV remoter accepts the key, CEC sometimes does not. Retry once
+# if MQTT volumechange does not confirm (this set has never reported it).
+VOLUME_CEC_GAP = 1.2
+VOLUME_CEC_RETRY_WAIT = 0.55
 
 # When the current level is unknown, drive to 0 then climb (extra downs are no-ops).
 VOLUME_UNKNOWN_FLOOR_STEPS = 100

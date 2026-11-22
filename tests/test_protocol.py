@@ -225,10 +225,10 @@ def test_wol_packet_shape(proto_client, monkeypatch) -> None:
     assert addr[1] == 9
 
 
-def test_volume_step_lan_only_no_mqtt(
+def test_volume_step_lan_only_retries_without_volumechange(
     proto_client, proto_credentials, monkeypatch
 ) -> None:
-    """MQTT sendkey does not move volume — LAN remoter KEY only."""
+    """08-15: LAN HTTP 200 is not CEC ACK; retry once, never MQTT sendkey."""
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client._creds = proto_credentials.generate_dynamic_credentials(
         "aa:bb:cc:dd:ee:ff", timestamp=1
@@ -250,8 +250,34 @@ def test_volume_step_lan_only_no_mqtt(
     )
     monkeypatch.setattr(client, "_publish_action", publish_action)
     assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
-    assert keys == ["KEY_VOLUMEUP"]
+    assert keys == ["KEY_VOLUMEUP", "KEY_VOLUMEUP"]
     assert calls == []
+
+
+def test_volume_step_skips_retry_when_volumechange_arrives(
+    proto_client, proto_credentials, monkeypatch
+) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client._creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+    client.state.volume = 10
+    client._control_warmup = False
+    client._last_remoter_ok_at = 10_000.0
+    client._last_volume_deliver_at = 0.0
+    keys: list[str] = []
+
+    def pause(_delay: float) -> None:
+        client.state.volume = 11
+        client._volume_ack.set()
+
+    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
+    monkeypatch.setattr(
+        proto_client, "send_local_key", lambda host, key, **kwargs: keys.append(key) or 200
+    )
+    monkeypatch.setattr(client, "_publish_action", lambda *a, **k: None)
+    assert client._send_volume_step("KEY_VOLUMEUP", pause=pause) is True
+    assert keys == ["KEY_VOLUMEUP"]
 
 
 def test_volume_step_paces_between_presses(
@@ -318,6 +344,6 @@ def test_set_volume_steps_via_keys(proto_client, proto_credentials, monkeypatch)
         proto_client, "send_local_key", lambda host, key, **kwargs: keys.append(key) or 200
     )
     client.set_volume(13, pause=lambda _delay: None)
-    assert keys == ["KEY_VOLUMEUP", "KEY_VOLUMEUP", "KEY_VOLUMEUP"]
+    assert keys == ["KEY_VOLUMEUP"] * 6
     assert not any(action in {"sendkey", "changevolume"} for _s, action, _p, _k in calls)
     assert client.state.volume == 13
