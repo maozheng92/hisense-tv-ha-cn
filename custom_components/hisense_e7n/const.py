@@ -48,6 +48,9 @@ REMOTER_READY_TIMEOUT = 5.0
 REMOTER_READY_POLL = 0.25
 # Probe the non-sticky remoter port quickly so a dead 7778 does not stall 7779.
 REMOTER_PROBE_TIMEOUT = 0.35
+# LAN remoter KEY (volume +/-) can drop MQTT 36669 for a moment. Do not flip
+# media_player on→off→on until the broker stays down this long.
+MQTT_DISCONNECT_GRACE = 3.0
 CONF_CUSTOM_SOURCE_NAME = "custom_source_name"
 CONF_SEQUENCE_BUTTON = "sequence_button"
 CONF_SEQUENCE_ACTION = "sequence_action"

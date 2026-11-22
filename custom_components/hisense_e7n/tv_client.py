@@ -27,6 +27,7 @@ from .const import (
     DEFAULT_SOURCE_KEY_DELAY,
     MQTT_CONNACK_WAIT,
     MQTT_CONNECT_TIMEOUT,
+    MQTT_DISCONNECT_GRACE,
     MQTT_KEEPALIVE,
     RC_TCP_FAILED,
     RC_TLS_FAILED,
@@ -229,6 +230,9 @@ class HisenseTvClient:
         self._volume_lock = threading.Lock()
         self._last_remoter_ok_at = 0.0
         self._last_volume_deliver_at = 0.0
+        self._mqtt_epoch = 0
+        self._offline_timer: threading.Timer | None = None
+        self._offline_lock = threading.Lock()
 
     @property
     def creds(self) -> MqttCredentials | None:
@@ -301,18 +305,33 @@ class HisenseTvClient:
                 self.state.statetype = data
                 self.state.power_on = True
             return
-        self.state.statetype = data.get("statetype") or data.get("state")
+        raw_type = data.get("statetype")
+        raw_state = data.get("state")
+        label: str | None = None
+        if raw_type is not None and str(raw_type).strip() != "":
+            label = str(raw_type)
+        elif isinstance(raw_state, str) and raw_state.strip():
+            # Numeric ``state`` flags (0/1) are not a power statetype.
+            label = raw_state
         name = data.get("sourcename") or data.get("source_name") or data.get("displayname")
         sid = data.get("sourceid") or data.get("source_id")
         if name:
             self.state.source_name = str(name)
         if sid is not None:
             self.state.source_id = str(sid)
-        kind = str(self.state.statetype or "").lower()
-        # sehaas treats fake_sleep_0 as off while the broker is still up.
-        self.state.power_on = kind not in {"fake_sleep_0", "fake_sleep", "tvsleep", "sleep", "off"}
-        if kind == "livetv":
-            self.state.source_name = data.get("channel_name") or name or "TV"
+        if label is not None:
+            self.state.statetype = label
+            kind = label.lower()
+            # sehaas treats fake_sleep_0 as off while the broker is still up.
+            self.state.power_on = kind not in {
+                "fake_sleep_0",
+                "fake_sleep",
+                "tvsleep",
+                "sleep",
+                "off",
+            }
+            if kind == "livetv":
+                self.state.source_name = data.get("channel_name") or name or "TV"
         self._apply_volume(data)
         self._maybe_learn_tv_mac(data)
 
@@ -404,6 +423,8 @@ class HisenseTvClient:
             self._set_loop_event(self._connected_event)
             return
         _LOGGER.info("Connected to %s:%s as %s", self.host, self.port, self._creds.client_id if self._creds else "")
+        self._mqtt_epoch += 1
+        self._cancel_offline_timer()
         self.state.available = True
         self.state.power_on = True
         self.state.last_error = None
@@ -411,6 +432,57 @@ class HisenseTvClient:
             for topic in topics.subscription_topics(self._creds, self.tv_mac):
                 client.subscribe(topic, qos=0)
         self._set_loop_event(self._connected_event)
+        self._notify()
+
+    def _cancel_offline_timer(self) -> None:
+        with self._offline_lock:
+            timer = self._offline_timer
+            self._offline_timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def _schedule_offline(self, epoch: int) -> None:
+        self._cancel_offline_timer()
+        timer = threading.Timer(
+            MQTT_DISCONNECT_GRACE, self._apply_mqtt_offline, args=(epoch,)
+        )
+        timer.daemon = True
+        with self._offline_lock:
+            self._offline_timer = timer
+        timer.start()
+
+    def _note_remoter_ok(self) -> None:
+        """LAN 7778/7779 answered — the TV is on even if MQTT just blipped."""
+        self._last_remoter_ok_at = time.monotonic()
+        self._control_warmup = False
+        changed = False
+        if not self.state.available:
+            self.state.available = True
+            changed = True
+        if not self.state.power_on:
+            self.state.power_on = True
+            changed = True
+        pending = False
+        with self._offline_lock:
+            pending = self._offline_timer is not None
+        if pending:
+            self._schedule_offline(self._mqtt_epoch)
+        if changed:
+            self._notify()
+
+    def _apply_mqtt_offline(self, epoch: int) -> None:
+        """Mark the TV off only if this disconnect was not followed by CONNECT."""
+        if epoch != self._mqtt_epoch or self._stop.is_set():
+            return
+        ble_up = self.ble is not None and getattr(self.ble, "connected", False)
+        if ble_up:
+            self.state.available = True
+            self._notify()
+            return
+        _LOGGER.info("MQTT still down after %.1fs; marking TV off", MQTT_DISCONNECT_GRACE)
+        self.state.available = False
+        self.state.power_on = False
+        self._control_warmup = True
         self._notify()
 
     def _on_disconnect(self, client: mqtt.Client, userdata: Any, *args: Any, **kwargs: Any) -> None:
@@ -425,10 +497,9 @@ class HisenseTvClient:
             self.state.available = True
             self._notify()
             return
-        self.state.available = False
-        self.state.power_on = False
-        self._control_warmup = True
-        self._notify()
+        # Volume +/- hits LAN remoter 7778; that can drop MQTT 36669 briefly.
+        # Flipping power_on here makes media_player go on→off→on.
+        self._schedule_offline(self._mqtt_epoch)
 
     def _on_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
         try:
@@ -621,6 +692,8 @@ class HisenseTvClient:
 
     def disconnect_blocking(self) -> None:
         self._stop.set()
+        self._mqtt_epoch += 1
+        self._cancel_offline_timer()
         client = self._client
         self._client = None
         if client is None:
@@ -688,8 +761,7 @@ class HisenseTvClient:
             return
         status = send_local_key(self.host, name)
         if status is not None and 200 <= status < 300:
-            self._last_remoter_ok_at = time.monotonic()
-            self._control_warmup = False
+            self._note_remoter_ok()
             return
         _LOGGER.info("HTTP remote did not take %s (status %s); trying MQTT", name, status)
         self._publish_action("remote_service", "sendkey", key, as_key=True)
@@ -855,8 +927,7 @@ class HisenseTvClient:
             status = send_local_key(self.host, name)
             delivered = status is not None and 200 <= status < 300
             if delivered:
-                self._last_remoter_ok_at = time.monotonic()
-                self._control_warmup = False
+                self._note_remoter_ok()
                 _LOGGER.info("volume step LAN %s (status %s)", name, status)
             else:
                 _LOGGER.info("volume step LAN %s missed (status %s)", name, status)

@@ -106,6 +106,71 @@ def test_token_issuance_replaces_the_pairing_secret(proto_client) -> None:
     assert client.state.needs_pin is False
 
 
+def test_partial_state_does_not_clear_power(proto_client) -> None:
+    """Volume OSD often republishes ui_service/state without statetype."""
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    client.state.power_on = True
+    client._apply_state({"statetype": "livetv", "sourcename": "HDMI1"})
+    client._apply_state({"volume_value": 18, "volume_type": 1, "state": 1})
+    assert client.state.power_on is True
+    assert client.state.statetype == "livetv"
+    assert client.state.volume == 18
+    assert client.state.volume_type == 1
+
+
+def test_mqtt_disconnect_does_not_immediately_turn_off(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    client.state.power_on = True
+    client._on_disconnect(None, None, 0)
+    assert client.state.available is True
+    assert client.state.power_on is True
+    client._cancel_offline_timer()
+
+
+def test_mqtt_reconnect_before_grace_keeps_player_on(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    client.state.power_on = True
+    epoch = client._mqtt_epoch
+    client._on_disconnect(None, None, 0)
+    client._on_connect(None, None, {}, 0)
+    client._apply_mqtt_offline(epoch)
+    assert client.state.available is True
+    assert client.state.power_on is True
+    client._cancel_offline_timer()
+
+
+def test_mqtt_offline_after_grace_turns_player_off(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    client.state.power_on = True
+    client._on_disconnect(None, None, 0)
+    client._apply_mqtt_offline(client._mqtt_epoch)
+    assert client.state.available is False
+    assert client.state.power_on is False
+    client._cancel_offline_timer()
+
+
+def test_remoter_ok_keeps_player_on_during_mqtt_blip(
+    proto_client, monkeypatch
+) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    client.state.power_on = True
+    client._control_warmup = False
+    client._last_remoter_ok_at = 10_000.0
+    client._last_volume_deliver_at = 0.0
+    client._on_disconnect(None, None, 0)
+    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
+    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: 200)
+    assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
+    assert client.state.available is True
+    assert client.state.power_on is True
+    client._cancel_offline_timer()
+
+
 def test_fake_sleep_and_tvsleep_turn_the_player_off(proto_client) -> None:
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client._apply_state({"statetype": "fake_sleep_0"})
