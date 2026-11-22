@@ -30,6 +30,8 @@ from .const import (
     MQTT_KEEPALIVE,
     RC_TCP_FAILED,
     RC_TLS_FAILED,
+    VOLUME_KEY_PAUSE,
+    VOLUME_UNKNOWN_FLOOR_STEPS,
 )
 from .credentials import (
     MqttCredentials,
@@ -38,7 +40,7 @@ from .credentials import (
     normalize_uuid,
     with_access_token,
 )
-from .keys import KEY_POWER, KEY_SOURCE, normalize_key
+from .keys import KEY_POWER, KEY_SOURCE, KEY_VOLUMEDOWN, KEY_VOLUMEUP, normalize_key
 from .local_http import (
     capture_screen,
     is_android_package,
@@ -656,9 +658,11 @@ class HisenseTvClient:
             return
         status = send_local_key(self.host, name)
         if status is not None and 200 <= status < 300:
+            self._note_volume_key(name)
             return
         _LOGGER.info("HTTP remote did not take %s (status %s); trying MQTT", name, status)
         self._publish_action("remote_service", "sendkey", key, as_key=True)
+        self._note_volume_key(name)
 
     def submit_code(self, code: str) -> None:
         """Send the 4 digits shown on the TV after vidaa_app_connect."""
@@ -726,11 +730,106 @@ class HisenseTvClient:
         for action in ("smartimage", "pushSmartImage", "functionSmartImage"):
             self._publish_action("ui_service", action, "")
 
-    def set_volume(self, volume: int) -> None:
-        volume = max(0, min(100, int(volume)))
-        # sehaas publishes the bare level, not a JSON object.
-        self._publish_action("platform_service", "changevolume", volume)
-        self.state.volume = volume
+    def _note_volume_key(self, name: str) -> None:
+        """Keep a local estimate when remoter volume keys succeed."""
+        if self.state.volume is None:
+            return
+        if name == KEY_VOLUMEUP:
+            self.state.volume = min(100, int(self.state.volume) + 1)
+            self._notify()
+        elif name == KEY_VOLUMEDOWN:
+            self.state.volume = max(0, int(self.state.volume) - 1)
+            self._notify()
+
+    def _press_volume_key(
+        self,
+        key: str,
+        *,
+        count: int,
+        pause: Callable[[float], None] = time.sleep,
+        step_pause: float = VOLUME_KEY_PAUSE,
+    ) -> bool:
+        """Send KEY_VOLUME* via LAN remoter first, MQTT sendkey second."""
+        if count <= 0:
+            return True
+        name = normalize_key(key)
+        wait = max(0.0, float(step_pause))
+        for index in range(count):
+            status = send_local_key(self.host, name)
+            if status is None or not (200 <= status < 300):
+                try:
+                    self._publish_action("remote_service", "sendkey", name, as_key=True)
+                except RuntimeError:
+                    _LOGGER.debug("Volume key %s failed after local miss", name, exc_info=True)
+                    return False
+            if index + 1 < count and wait:
+                pause(wait)
+        return True
+
+    def _set_volume_by_keys(
+        self,
+        target: int,
+        *,
+        pause: Callable[[float], None] = time.sleep,
+        step_pause: float = VOLUME_KEY_PAUSE,
+    ) -> bool:
+        """Move the TV volume with KEY_VOLUMEUP/DOWN. Return False if keys fail.
+
+        MQTT ``changevolume`` is a no-op on many E7N / 爱家 firmwares; the same
+        LAN remoter path used by the volume buttons is what actually works.
+        """
+        current = self.state.volume
+        if current is None:
+            try:
+                self._publish_action("platform_service", "getvolume", "")
+            except RuntimeError:
+                _LOGGER.debug("getvolume before set_volume failed", exc_info=True)
+            else:
+                pause(0.35)
+                current = self.state.volume
+        if current is None:
+            if not self._press_volume_key(
+                KEY_VOLUMEDOWN,
+                count=VOLUME_UNKNOWN_FLOOR_STEPS,
+                pause=pause,
+                step_pause=step_pause,
+            ):
+                return False
+            current = 0
+        delta = int(target) - int(current)
+        if delta == 0:
+            return True
+        key = KEY_VOLUMEUP if delta > 0 else KEY_VOLUMEDOWN
+        return self._press_volume_key(
+            key,
+            count=abs(delta),
+            pause=pause,
+            step_pause=step_pause,
+        )
+
+    def set_volume(
+        self,
+        volume: int,
+        *,
+        pause: Callable[[float], None] = time.sleep,
+    ) -> None:
+        """Set absolute volume 0–100.
+
+        Prefer remoter ``KEY_VOLUME*`` steps (LAN HTTP, then MQTT sendkey). Fall
+        back to MQTT ``changevolume`` only when those keys cannot be delivered.
+        Always refresh via ``getvolume`` when MQTT is up so HA can reflect state.
+        """
+        target = max(0, min(100, int(volume)))
+        used_keys = self._set_volume_by_keys(target, pause=pause)
+        if not used_keys:
+            # sehaas / VIDAA absolute level — bare digit string, not JSON.
+            self._publish_action("platform_service", "changevolume", str(target))
+        self.state.volume = target
+        self._notify()
+        try:
+            self._publish_action("platform_service", "getvolume", "")
+        except RuntimeError:
+            _LOGGER.debug("getvolume after set_volume failed", exc_info=True)
 
     def change_source(self, source_id: str, source_name: str | None = None) -> None:
         payload: dict[str, str] = {"sourceid": str(source_id)}

@@ -217,3 +217,86 @@ def test_wol_packet_shape(proto_client, monkeypatch) -> None:
     assert packet.startswith(b"\xff" * 6)
     assert packet.count(bytes.fromhex("aabbccddeeff")) == 16
     assert addr[1] == 9
+
+
+def test_set_volume_uses_local_volume_keys(proto_client, proto_credentials, monkeypatch) -> None:
+    """Slider must step KEY_VOLUME* on the LAN remoter; changevolume alone is ineffective."""
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client._creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+    client.state.volume = 10
+    published: list[tuple[str, str]] = []
+    keys: list[str] = []
+
+    class FakeMqtt:
+        def publish(self, topic, body, qos=0, retain=False):
+            published.append((topic, body))
+
+            class Info:
+                rc = proto_client.mqtt.MQTT_ERR_SUCCESS
+
+                def wait_for_publish(self, timeout=None):
+                    return None
+
+            return Info()
+
+    client._client = FakeMqtt()
+    monkeypatch.setattr(
+        proto_client,
+        "send_local_key",
+        lambda host, key, **kwargs: keys.append(key) or 200,
+    )
+    client.set_volume(13, pause=lambda _delay: None)
+    assert keys == ["KEY_VOLUMEUP", "KEY_VOLUMEUP", "KEY_VOLUMEUP"]
+    assert client.state.volume == 13
+    assert any(topic.endswith("/actions/getvolume") for topic, _ in published)
+    assert not any(topic.endswith("/actions/changevolume") for topic, _ in published)
+
+
+def test_set_volume_falls_back_to_mqtt_changevolume(
+    proto_client, proto_credentials, monkeypatch
+) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client._creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+    client.state.volume = 20
+    published: list[tuple[str, str]] = []
+
+    class FakeMqtt:
+        def publish(self, topic, body, qos=0, retain=False):
+            published.append((topic, body))
+
+            class Info:
+                rc = proto_client.mqtt.MQTT_ERR_SUCCESS
+
+                def wait_for_publish(self, timeout=None):
+                    return None
+
+            return Info()
+
+    client._client = FakeMqtt()
+    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: None)
+    calls: list[tuple] = []
+
+    def publish_action(service, action, payload, *, as_key=False):
+        calls.append((service, action, payload, as_key))
+        if action == "sendkey":
+            raise RuntimeError("sendkey down")
+
+    monkeypatch.setattr(client, "_publish_action", publish_action)
+    client.set_volume(35, pause=lambda _delay: None)
+    assert ("platform_service", "changevolume", "35", False) in calls
+    assert client.state.volume == 35
+    assert ("platform_service", "getvolume", "", False) in calls
+
+
+def test_volume_keys_update_tracked_level(proto_client, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.volume = 40
+    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: 200)
+    client.send_key("KEY_VOLUMEUP")
+    assert client.state.volume == 41
+    client.send_key("KEY_VOLUMEDOWN")
+    assert client.state.volume == 40

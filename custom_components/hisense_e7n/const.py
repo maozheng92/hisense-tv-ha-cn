@@ -29,6 +29,10 @@ CONF_CUSTOM_SOURCES = "custom_sources"
 CONF_CUSTOM_SOURCES_TEXT = "custom_sources_text"
 CONF_SOURCE_KEY_DELAY = "source_key_delay"
 DEFAULT_SOURCE_KEY_DELAY = 0.5
+# Absolute volume uses KEY_VOLUMEUP/DOWN on the LAN remoter; pause between steps.
+VOLUME_KEY_PAUSE = 0.05
+# When the current level is unknown, drive to 0 then climb (extra downs are no-ops).
+VOLUME_UNKNOWN_FLOOR_STEPS = 100
 CONF_CUSTOM_SOURCE_NAME = "custom_source_name"
 CONF_SEQUENCE_BUTTON = "sequence_button"
 CONF_SEQUENCE_ACTION = "sequence_action"
