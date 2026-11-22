@@ -41,6 +41,8 @@ from .const import (
     CONF_POWER_ON_DEVICE,
     CONF_POWER_ON_MODE,
     CONF_POWER_ON_REMOTE,
+    CONF_VOLUME_DOWN_BUTTON,
+    CONF_VOLUME_UP_BUTTON,
     CONF_SEQUENCE_ACTION,
     CONF_SEQUENCE_BUTTON,
     CONF_SOURCE_KEY_DELAY,
@@ -75,10 +77,14 @@ from .power import (
     infer_power_on_mode,
     normalize_power_on_entity,
     power_on_form_errors,
+    volume_button_form_errors,
 )
 from .tv_client import HisenseTvClient, classify_connect_error
 
 POWER_ON_BUTTON_SELECTOR = EntitySelector(
+    EntitySelectorConfig(domain=list(POWER_ON_DOMAINS), multiple=False)
+)
+VOLUME_BUTTON_SELECTOR = EntitySelector(
     EntitySelectorConfig(domain=list(POWER_ON_DOMAINS), multiple=False)
 )
 POWER_ON_REMOTE_SELECTOR = EntitySelector(
@@ -133,6 +139,8 @@ def _power_on_fields() -> dict[Any, Any]:
             TextSelectorConfig(type="text")
         ),
         vol.Optional(CONF_POWER_ON_DEVICE): TextSelector(TextSelectorConfig(type="text")),
+        vol.Optional(CONF_VOLUME_UP_BUTTON): VOLUME_BUTTON_SELECTOR,
+        vol.Optional(CONF_VOLUME_DOWN_BUTTON): VOLUME_BUTTON_SELECTOR,
     }
 
 
@@ -169,7 +177,10 @@ class HisenseE7NConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            form_errors = power_on_form_errors(user_input)
+            form_errors = {
+                **power_on_form_errors(user_input),
+                **volume_button_form_errors(user_input),
+            }
             if form_errors:
                 return self.async_show_form(
                     step_id="user",
@@ -233,6 +244,8 @@ class HisenseE7NConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_POWER_ON_COMMAND: user_input.get(CONF_POWER_ON_COMMAND)
                     or DEFAULT_POWER_ON_COMMAND,
                     CONF_POWER_ON_DEVICE: user_input.get(CONF_POWER_ON_DEVICE) or "",
+                    CONF_VOLUME_UP_BUTTON: user_input.get(CONF_VOLUME_UP_BUTTON) or "",
+                    CONF_VOLUME_DOWN_BUTTON: user_input.get(CONF_VOLUME_DOWN_BUTTON) or "",
                     CONF_NAME: user_input.get(CONF_NAME) or DEFAULT_NAME,
                     CONF_AUTH_MODE: user_input.get(CONF_AUTH_MODE, DEFAULT_AUTH_MODE),
                     CONF_CLIENT_UUID: uuid,
@@ -323,6 +336,8 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
             CONF_POWER_ON_COMMAND: cleaned.get(CONF_POWER_ON_COMMAND)
             or DEFAULT_POWER_ON_COMMAND,
             CONF_POWER_ON_DEVICE: cleaned.get(CONF_POWER_ON_DEVICE) or "",
+            CONF_VOLUME_UP_BUTTON: cleaned.get(CONF_VOLUME_UP_BUTTON) or "",
+            CONF_VOLUME_DOWN_BUTTON: cleaned.get(CONF_VOLUME_DOWN_BUTTON) or "",
             CONF_CUSTOM_SOURCES: sources,
             CONF_SOURCE_KEY_DELAY: self._clamp_delay(
                 cleaned.get(CONF_SOURCE_KEY_DELAY, DEFAULT_SOURCE_KEY_DELAY)
@@ -362,7 +377,10 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
         data = self._merged()
         if user_input is not None:
             merged = {**data, **user_input}
-            form_errors = power_on_form_errors(merged)
+            form_errors = {
+                **power_on_form_errors(merged),
+                **volume_button_form_errors(merged),
+            }
             if form_errors:
                 return self.async_show_form(
                     step_id="basic",
@@ -384,6 +402,10 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
             suggested.pop(CONF_POWER_ON_BUTTON, None)
         if not normalize_power_on_entity(suggested.get(CONF_POWER_ON_REMOTE)):
             suggested.pop(CONF_POWER_ON_REMOTE, None)
+        if not normalize_power_on_entity(suggested.get(CONF_VOLUME_UP_BUTTON)):
+            suggested.pop(CONF_VOLUME_UP_BUTTON, None)
+        if not normalize_power_on_entity(suggested.get(CONF_VOLUME_DOWN_BUTTON)):
+            suggested.pop(CONF_VOLUME_DOWN_BUTTON, None)
         suggested[CONF_POWER_ON_MODE] = infer_power_on_mode(
             suggested.get(CONF_POWER_ON_MODE),
             suggested.get(CONF_POWER_ON_BUTTON),

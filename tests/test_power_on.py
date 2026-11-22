@@ -91,6 +91,40 @@ def test_button_mode_can_be_left_empty(proto_power) -> None:
     assert proto_power.power_on_form_errors({"power_on_mode": "button"}) == {}
 
 
+def test_volume_button_presses_entity(proto_power) -> None:
+    call = proto_power.entity_press_call("button.ir_tv_vol_up")
+    assert call is not None
+    assert (call.domain, call.service) == ("button", "press")
+    assert call.data == {"entity_id": "button.ir_tv_vol_up"}
+    script = proto_power.entity_press_call("script.tv_volume_down")
+    assert script is not None
+    assert (script.domain, script.service) == ("script", "turn_on")
+    assert proto_power.entity_press_call("") is None
+    assert proto_power.entity_press_call("media_player.tv") is None
+
+
+def test_volume_button_form_errors(proto_power) -> None:
+    assert proto_power.volume_button_form_errors({}) == {}
+    assert proto_power.volume_button_form_errors(
+        {"volume_up_button": "button.ir_vol_up"}
+    ) == {}
+    errors = proto_power.volume_button_form_errors(
+        {"volume_down_button": "media_player.tv"}
+    )
+    assert errors["volume_down_button"] == "volume_button_invalid"
+
+
+def test_clean_volume_button_fields(proto_power) -> None:
+    cleaned = proto_power.clean_power_on_fields(
+        {
+            "volume_up_button": " button.ir_vol_up ",
+            "volume_down_button": "",
+        }
+    )
+    assert cleaned["volume_up_button"] == "button.ir_vol_up"
+    assert cleaned["volume_down_button"] == ""
+
+
 def test_unsupported_domain_raises(proto_power) -> None:
     with pytest.raises(ValueError, match="unsupported power-on domain"):
         proto_power.power_on_service("media_player.tv")

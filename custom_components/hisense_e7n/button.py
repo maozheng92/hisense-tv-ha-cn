@@ -95,7 +95,7 @@ class HisenseTvRemoterButton(HisenseTvEntity, ButtonEntity):
         if kind == "smart_image":
             await client.async_push_smart_image()
             return
-        await client.async_send_key(self._spec.payload or self._spec.slug)
+        await self.coordinator.async_send_key(self._spec.payload or self._spec.slug)
 
 
 class HisenseTvCustomSourceButton(HisenseTvEntity, ButtonEntity):

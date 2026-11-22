@@ -137,11 +137,11 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         await self.coordinator.client.async_turn_off()
 
     async def async_volume_up(self) -> None:
-        await self.coordinator.client.async_send_key(KEY_VOLUMEUP)
+        await self.coordinator.async_send_key(KEY_VOLUMEUP)
         self.async_write_ha_state()
 
     async def async_volume_down(self) -> None:
-        await self.coordinator.client.async_send_key(KEY_VOLUMEDOWN)
+        await self.coordinator.async_send_key(KEY_VOLUMEDOWN)
         self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool) -> None:

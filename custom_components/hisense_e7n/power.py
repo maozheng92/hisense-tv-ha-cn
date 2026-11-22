@@ -20,6 +20,8 @@ from .const import (
     CONF_POWER_ON_DEVICE,
     CONF_POWER_ON_MODE,
     CONF_POWER_ON_REMOTE,
+    CONF_VOLUME_DOWN_BUTTON,
+    CONF_VOLUME_UP_BUTTON,
     DEFAULT_POWER_ON_COMMAND,
     POWER_ON_MODE_BUTTON,
     POWER_ON_MODE_REMOTE,
@@ -114,6 +116,18 @@ def power_on_call(
     return None
 
 
+def entity_press_call(entity_id: str | None) -> PowerOnCall | None:
+    """Press a button / switch / script. Used for optional volume +/- entities."""
+    entity = normalize_power_on_entity(entity_id)
+    if entity is None:
+        return None
+    try:
+        domain, service = power_on_service(entity)
+    except ValueError:
+        return None
+    return PowerOnCall(domain, service, {"entity_id": entity})
+
+
 def power_on_form_errors(data: dict[str, Any]) -> dict[str, str]:
     """Validate the per-TV power-on fields. Empty button mode is allowed."""
     mode = data.get(CONF_POWER_ON_MODE) or POWER_ON_MODE_BUTTON
@@ -143,4 +157,28 @@ def clean_power_on_fields(data: dict[str, Any]) -> dict[str, Any]:
         cleaned[CONF_POWER_ON_REMOTE],
         data.get("mac"),
     )
+    return clean_volume_button_fields(cleaned)
+
+
+def clean_volume_button_fields(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize optional volume +/- button entities."""
+    cleaned = dict(data)
+    cleaned[CONF_VOLUME_UP_BUTTON] = (
+        normalize_power_on_entity(data.get(CONF_VOLUME_UP_BUTTON)) or ""
+    )
+    cleaned[CONF_VOLUME_DOWN_BUTTON] = (
+        normalize_power_on_entity(data.get(CONF_VOLUME_DOWN_BUTTON)) or ""
+    )
     return cleaned
+
+
+def volume_button_form_errors(data: dict[str, Any]) -> dict[str, str]:
+    """Reject volume entities that are not a button, switch, or script."""
+    errors: dict[str, str] = {}
+    for key in (CONF_VOLUME_UP_BUTTON, CONF_VOLUME_DOWN_BUTTON):
+        raw = data.get(key)
+        if not str(raw or "").strip():
+            continue
+        if entity_press_call(str(raw)) is None:
+            errors[key] = "volume_button_invalid"
+    return errors
