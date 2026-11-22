@@ -33,8 +33,8 @@ from .keys import (
     KEY_VOLUMEUP,
 )
 
-# No VOLUME_SET: ARC/eARC only supports ±1 via changevolume; TV speakers use
-# KEY_VOLUME*. Expose VOLUME_STEP (+/−) only — never a HA slider.
+# No VOLUME_SET: +/- publishes MQTT changevolume (±1 / CEC on eARC). Expose
+# VOLUME_STEP only — never a HA slider.
 SUPPORT = (
     MediaPlayerEntityFeature.TURN_ON
     | MediaPlayerEntityFeature.TURN_OFF

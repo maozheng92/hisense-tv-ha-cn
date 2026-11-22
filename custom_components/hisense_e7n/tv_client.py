@@ -786,26 +786,18 @@ class HisenseTvClient:
         self.state.volume = max(0, min(100, int(self.state.volume) + int(delta)))
         self._notify()
 
-    def _refresh_volume_state(self, pause: Callable[[float], None]) -> None:
-        try:
-            self._publish_action("platform_service", "getvolume", "")
-        except RuntimeError:
-            _LOGGER.debug("getvolume before volume step failed", exc_info=True)
-            return
-        pause(0.3)
-
     def _is_arc_audio(self) -> bool:
         """True when HDMI ARC/eARC is the active audio output (CEC volume)."""
         return self.state.volume_type == VOLUME_TYPE_ARC
 
-    def _nudge_arc_volume(self, delta: int) -> bool:
-        """Step ARC/eARC volume via MQTT changevolume (relative ±1).
+    def _nudge_volume_mqtt(self, delta: int) -> bool:
+        """Step volume via MQTT ``changevolume`` (VIDAA platform_service).
 
-        On ARC/eARC the TV does not take absolute levels: a payload above the
-        current value raises CEC volume by one, below lowers by one
-        (VIDAA / RemoteNOW; see HA community Hisense MQTT notes). KEY_VOLUME*
-        on the LAN remoter is unreliable in this mode. Prefer current±1 when
-        known; otherwise 100 / 0 always nudges ARC by one without a slider.
+        On HDMI ARC/eARC this is a CEC relative nudge: any payload above the
+        current level raises volume by one, below lowers by one. On TV speakers
+        the same publish sets the absolute level to that value, so current±1
+        is still a one-step change. Prefer current±1 when known; otherwise
+        100 / 0 (safe ARC nudge when getvolume has not reported yet).
         """
         if delta == 0:
             return True
@@ -817,13 +809,20 @@ class HisenseTvClient:
         try:
             self._publish_action("platform_service", "changevolume", str(tip))
         except RuntimeError:
-            _LOGGER.debug("ARC changevolume nudge failed", exc_info=True)
+            _LOGGER.debug("changevolume nudge failed", exc_info=True)
             return False
+        _LOGGER.info(
+            "MQTT changevolume nudge %s (volume_type=%s, was=%s)",
+            tip,
+            self.state.volume_type,
+            current,
+        )
         self._note_volume_delta(1 if delta > 0 else -1)
         try:
+            # Best-effort refresh; do not block the next press on a reply.
             self._publish_action("platform_service", "getvolume", "")
         except RuntimeError:
-            _LOGGER.debug("getvolume after ARC nudge failed", exc_info=True)
+            _LOGGER.debug("getvolume after changevolume failed", exc_info=True)
         return True
 
     def _send_volume_key_local(
@@ -832,7 +831,7 @@ class HisenseTvClient:
         *,
         pause: Callable[[float], None] = time.sleep,
     ) -> bool:
-        """TV-speaker volume: LAN KEY_VOLUME*, MQTT sendkey fallback."""
+        """LAN KEY_VOLUME* / MQTT sendkey — TV speakers only fallback."""
         idle = time.monotonic() - self._last_remoter_ok_at
         if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
             self._wait_for_remoter(pause=pause)
@@ -857,19 +856,24 @@ class HisenseTvClient:
         *,
         pause: Callable[[float], None] = time.sleep,
     ) -> bool:
-        """One media_player +/- step. ARC/eARC uses CEC changevolume; else KEY_*.
+        """One media_player +/- step via MQTT changevolume (not KEY-first).
 
-        No ``VOLUME_SET`` slider: UI stays on VOLUME_STEP only.
+        HA debug log ``home-assistant_hisense_e7n_2026-11-22T07-27-38.281Z``
+        showed every press as ``getvolume`` then ``KEY_VOLUMEUP`` accepted on
+        TCP 7778 — and **never** ``changevolume``. On eARC that HTTP ACK does
+        not move CEC volume (~1/10 presses). ``volume_type`` stayed unset, so
+        the old ARC branch never ran. Protocol fix: always publish
+        ``changevolume`` for +/-; KEY only if MQTT publish fails.
+
+        No ``VOLUME_SET`` slider.
         """
         name = normalize_key(key)
         if name not in {KEY_VOLUMEUP, KEY_VOLUMEDOWN}:
             raise ValueError(f"not a volume key: {key}")
         delta = 1 if name == KEY_VOLUMEUP else -1
         with self._volume_lock:
-            if self.state.volume_type is None:
-                self._refresh_volume_state(pause)
-            if self._is_arc_audio():
-                return self._nudge_arc_volume(delta)
+            if self._nudge_volume_mqtt(delta):
+                return True
             return self._send_volume_key_local(name, pause=pause)
 
     def _press_volume_key(
@@ -898,21 +902,12 @@ class HisenseTvClient:
         pause: Callable[[float], None] = time.sleep,
         step_pause: float = VOLUME_KEY_PAUSE,
     ) -> bool:
-        """Move toward an absolute level via ± steps (ARC-aware)."""
+        """Move toward an absolute level via repeated changevolume ±1 steps."""
         current = self.state.volume
-        if current is None or self.state.volume_type is None:
-            self._refresh_volume_state(pause)
-            current = self.state.volume
-        if self._is_arc_audio():
-            # ARC cannot seek absolutely; only ±1 per changevolume publish.
-            if current is None:
-                return False
-            delta = int(target) - int(current)
-            step = KEY_VOLUMEUP if delta > 0 else KEY_VOLUMEDOWN
-            return self._press_volume_key(
-                step, count=abs(delta), pause=pause, step_pause=step_pause
-            )
         if current is None:
+            # Unknown: one MQTT tip cannot seek; floor then climb on TV path.
+            if self._is_arc_audio():
+                return False
             if not self._press_volume_key(
                 KEY_VOLUMEDOWN,
                 count=VOLUME_UNKNOWN_FLOOR_STEPS,
@@ -938,18 +933,16 @@ class HisenseTvClient:
         *,
         pause: Callable[[float], None] = time.sleep,
     ) -> None:
-        """Best-effort absolute volume for non-UI callers (no HA slider).
-
-        ARC/eARC only supports ±1 via ``changevolume``; TV speakers use
-        ``KEY_VOLUME*``. Refresh ``getvolume`` afterward when MQTT is up.
-        """
+        """Best-effort absolute volume for non-UI callers (no HA slider)."""
         target = max(0, min(100, int(volume)))
         used = self._set_volume_by_keys(target, pause=pause)
-        if not used and not self._is_arc_audio():
-            self._publish_action("platform_service", "changevolume", str(target))
-        if not self._is_arc_audio():
-            self.state.volume = target
-            self._notify()
+        if not used:
+            try:
+                self._publish_action("platform_service", "changevolume", str(target))
+            except RuntimeError:
+                _LOGGER.debug("absolute changevolume failed", exc_info=True)
+        self.state.volume = target
+        self._notify()
         try:
             self._publish_action("platform_service", "getvolume", "")
         except RuntimeError:
