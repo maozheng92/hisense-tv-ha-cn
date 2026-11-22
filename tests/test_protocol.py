@@ -220,12 +220,14 @@ def test_wol_packet_shape(proto_client, monkeypatch) -> None:
 
 
 def test_set_volume_uses_local_volume_keys(proto_client, proto_credentials, monkeypatch) -> None:
-    """Slider must step KEY_VOLUME* on the LAN remoter; changevolume alone is ineffective."""
+    """Absolute helper steps KEY_VOLUME* on the LAN remoter; changevolume alone is ineffective."""
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client._creds = proto_credentials.generate_dynamic_credentials(
         "aa:bb:cc:dd:ee:ff", timestamp=1
     )
     client.state.volume = 10
+    client._control_warmup = False
+    client._last_remoter_ok_at = 10_000.0
     published: list[tuple[str, str]] = []
     keys: list[str] = []
 
@@ -242,6 +244,7 @@ def test_set_volume_uses_local_volume_keys(proto_client, proto_credentials, monk
             return Info()
 
     client._client = FakeMqtt()
+    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
     monkeypatch.setattr(
         proto_client,
         "send_local_key",
@@ -262,6 +265,8 @@ def test_set_volume_falls_back_to_mqtt_changevolume(
         "aa:bb:cc:dd:ee:ff", timestamp=1
     )
     client.state.volume = 20
+    client._control_warmup = False
+    client._last_remoter_ok_at = 10_000.0
     published: list[tuple[str, str]] = []
 
     class FakeMqtt:
@@ -277,6 +282,7 @@ def test_set_volume_falls_back_to_mqtt_changevolume(
             return Info()
 
     client._client = FakeMqtt()
+    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
     monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: None)
     calls: list[tuple] = []
 
@@ -295,8 +301,58 @@ def test_set_volume_falls_back_to_mqtt_changevolume(
 def test_volume_keys_update_tracked_level(proto_client, monkeypatch) -> None:
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client.state.volume = 40
+    client._control_warmup = False
+    client._last_remoter_ok_at = 10_000.0
+    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
     monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: 200)
     client.send_key("KEY_VOLUMEUP")
     assert client.state.volume == 41
     client.send_key("KEY_VOLUMEDOWN")
     assert client.state.volume == 40
+
+
+def test_volume_step_retries_then_mqtt(proto_client, proto_credentials, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client._creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+    client.state.volume = 5
+    client._control_warmup = False
+    client._last_remoter_ok_at = 10_000.0
+    attempts = {"n": 0}
+    calls: list[tuple] = []
+
+    def flaky_local(host, key, **kwargs):
+        attempts["n"] += 1
+        return None
+
+    def publish_action(service, action, payload, *, as_key=False):
+        calls.append((service, action, payload, as_key))
+
+    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
+    monkeypatch.setattr(proto_client, "send_local_key", flaky_local)
+    monkeypatch.setattr(client, "_publish_action", publish_action)
+    assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
+    assert attempts["n"] == 2
+    assert ("remote_service", "sendkey", "KEY_VOLUMEUP", True) in calls
+    assert client.state.volume == 6
+
+
+def test_volume_step_warms_up_after_idle(proto_client, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client._control_warmup = True
+    waited: list[bool] = []
+
+    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
+    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: 200)
+
+    original_wait = client._wait_for_remoter
+
+    def track_wait(*, pause=None, timeout=None, poll=None):
+        waited.append(True)
+        return original_wait(pause=pause or (lambda _d: None), timeout=0.01, poll=0.01)
+
+    monkeypatch.setattr(client, "_wait_for_remoter", track_wait)
+    client._send_volume_step("KEY_VOLUMEDOWN", pause=lambda _delay: None)
+    assert waited == [True]
+    assert client._control_warmup is False

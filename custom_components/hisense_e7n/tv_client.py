@@ -30,7 +30,13 @@ from .const import (
     MQTT_KEEPALIVE,
     RC_TCP_FAILED,
     RC_TLS_FAILED,
+    REMOTER_READY_POLL,
+    REMOTER_READY_TIMEOUT,
+    VOLUME_KEY_IDLE_WARMUP,
+    VOLUME_KEY_MIN_GAP,
     VOLUME_KEY_PAUSE,
+    VOLUME_KEY_RETRIES,
+    VOLUME_KEY_RETRY_DELAY,
     VOLUME_UNKNOWN_FLOOR_STEPS,
 )
 from .credentials import (
@@ -46,6 +52,7 @@ from .local_http import (
     is_android_package,
     launch_local_app,
     push_voice,
+    remoter_reachable,
     send_local_key,
 )
 
@@ -215,6 +222,11 @@ class HisenseTvClient:
         self._connect_rc: int = -1
         self._lock = threading.Lock()
         self.ble: Any = None
+        # After cold power-on / MQTT reconnect, wait for LAN remoter (7778/7779).
+        self._control_warmup = True
+        self._volume_lock = threading.Lock()
+        self._last_volume_key_at = 0.0
+        self._last_remoter_ok_at = 0.0
 
     @property
     def creds(self) -> MqttCredentials | None:
@@ -401,6 +413,7 @@ class HisenseTvClient:
             return
         self.state.available = False
         self.state.power_on = False
+        self._control_warmup = True
         self._notify()
 
     def _on_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
@@ -656,13 +669,16 @@ class HisenseTvClient:
         if name == KEY_SOURCE:
             self.open_source()
             return
+        if name in {KEY_VOLUMEUP, KEY_VOLUMEDOWN}:
+            self._send_volume_step(name)
+            return
         status = send_local_key(self.host, name)
         if status is not None and 200 <= status < 300:
-            self._note_volume_key(name)
+            self._last_remoter_ok_at = time.monotonic()
+            self._control_warmup = False
             return
         _LOGGER.info("HTTP remote did not take %s (status %s); trying MQTT", name, status)
         self._publish_action("remote_service", "sendkey", key, as_key=True)
-        self._note_volume_key(name)
 
     def submit_code(self, code: str) -> None:
         """Send the 4 digits shown on the TV after vidaa_app_connect."""
@@ -730,6 +746,27 @@ class HisenseTvClient:
         for action in ("smartimage", "pushSmartImage", "functionSmartImage"):
             self._publish_action("ui_service", action, "")
 
+    def _wait_for_remoter(
+        self,
+        *,
+        pause: Callable[[float], None] = time.sleep,
+        timeout: float = REMOTER_READY_TIMEOUT,
+        poll: float = REMOTER_READY_POLL,
+    ) -> bool:
+        """Block until the LAN remoter accepts TCP, or until timeout."""
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            if remoter_reachable(self.host):
+                return True
+            if time.monotonic() >= deadline:
+                _LOGGER.info(
+                    "LAN remoter on %s did not answer within %.1fs; continuing anyway",
+                    self.host,
+                    timeout,
+                )
+                return False
+            pause(max(0.05, float(poll)))
+
     def _note_volume_key(self, name: str) -> None:
         """Keep a local estimate when remoter volume keys succeed."""
         if self.state.volume is None:
@@ -741,6 +778,59 @@ class HisenseTvClient:
             self.state.volume = max(0, int(self.state.volume) - 1)
             self._notify()
 
+    def _send_volume_step(
+        self,
+        key: str,
+        *,
+        pause: Callable[[float], None] = time.sleep,
+    ) -> bool:
+        """Deliver one KEY_VOLUME* so the TV actually steps.
+
+        Dropped presses come from (1) remoter not listening yet after boot,
+        (2) probing a dead 7778 with a long timeout before 7779, (3) HA
+        hold-to-repeat firing faster than the remoter can accept, and
+        (4) a single HTTP miss with no retry. Serialize steps, warm up after
+        idle, enforce a minimum gap, retry local, then MQTT sendkey once.
+        Never send POST+GET duplicates after a 2xx, and do not reintroduce
+        absolute ``VOLUME_SET``.
+        """
+        name = normalize_key(key)
+        if name not in {KEY_VOLUMEUP, KEY_VOLUMEDOWN}:
+            raise ValueError(f"not a volume key: {key}")
+        with self._volume_lock:
+            now = time.monotonic()
+            gap = VOLUME_KEY_MIN_GAP - (now - self._last_volume_key_at)
+            if gap > 0:
+                pause(gap)
+            idle = now - self._last_remoter_ok_at
+            if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
+                self._wait_for_remoter(pause=pause)
+            last_status: int | None = None
+            for attempt in range(max(1, VOLUME_KEY_RETRIES)):
+                status = send_local_key(self.host, name)
+                last_status = status
+                if status is not None and 200 <= status < 300:
+                    self._last_volume_key_at = time.monotonic()
+                    self._last_remoter_ok_at = self._last_volume_key_at
+                    self._control_warmup = False
+                    self._note_volume_key(name)
+                    return True
+                if attempt + 1 < VOLUME_KEY_RETRIES:
+                    pause(VOLUME_KEY_RETRY_DELAY)
+            _LOGGER.info(
+                "HTTP volume %s missed (status %s); trying MQTT sendkey",
+                name,
+                last_status,
+            )
+            try:
+                self._publish_action("remote_service", "sendkey", name, as_key=True)
+            except RuntimeError:
+                _LOGGER.debug("MQTT volume sendkey failed", exc_info=True)
+                return False
+            self._last_volume_key_at = time.monotonic()
+            self._note_volume_key(name)
+            return True
+
     def _press_volume_key(
         self,
         key: str,
@@ -749,21 +839,13 @@ class HisenseTvClient:
         pause: Callable[[float], None] = time.sleep,
         step_pause: float = VOLUME_KEY_PAUSE,
     ) -> bool:
-        """Send KEY_VOLUME* via LAN remoter first, MQTT sendkey second."""
+        """Send KEY_VOLUME* count times via the reliable volume-step path."""
+        del step_pause  # gap is enforced inside _send_volume_step
         if count <= 0:
             return True
-        name = normalize_key(key)
-        wait = max(0.0, float(step_pause))
-        for index in range(count):
-            status = send_local_key(self.host, name)
-            if status is None or not (200 <= status < 300):
-                try:
-                    self._publish_action("remote_service", "sendkey", name, as_key=True)
-                except RuntimeError:
-                    _LOGGER.debug("Volume key %s failed after local miss", name, exc_info=True)
-                    return False
-            if index + 1 < count and wait:
-                pause(wait)
+        for _ in range(count):
+            if not self._send_volume_step(key, pause=pause):
+                return False
         return True
 
     def _set_volume_by_keys(

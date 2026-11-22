@@ -18,6 +18,7 @@ import json
 import logging
 import random
 import re
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -29,6 +30,8 @@ from typing import Any
 _LOGGER = logging.getLogger(__name__)
 
 LOCAL_KEY_PORTS = (7778, 7779)
+# Keep in sync with const.REMOTER_PROBE_TIMEOUT — short fail on the wrong port.
+DEFAULT_PROBE_TIMEOUT = 0.35
 VOICE_PORTS = (7779, 7778)
 SCREENSHOT_PORTS = (7779, 7778)
 APP_PORTS = (7779, 7778)
@@ -44,6 +47,43 @@ CAPTURE_COMMAND = {
 }
 _MAX_IMAGE = 12 * 1024 * 1024
 _PACKAGE_RE = re.compile(r"^[A-Za-z][\w]*(\.[A-Za-z][\w]*)+$")
+# Host → last remoter port that accepted a key (avoids stalling on a dead 7778).
+_preferred_key_ports: dict[str, int] = {}
+
+
+def remoter_reachable(
+    host: str,
+    *,
+    ports: tuple[int, ...] = LOCAL_KEY_PORTS,
+    timeout: float = 0.4,
+) -> bool:
+    """True when the TV's LAN remoter TCP port accepts a connection.
+
+    MQTT can be up before 7778/7779 is listening; the first KEY after cold
+    boot is otherwise dropped.
+    """
+    for port in ports:
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def clear_preferred_key_port(host: str | None = None) -> None:
+    """Drop sticky remoter port cache (tests / host change)."""
+    if host is None:
+        _preferred_key_ports.clear()
+        return
+    _preferred_key_ports.pop(host, None)
+
+
+def _key_port_order(host: str, ports: tuple[int, ...]) -> tuple[int, ...]:
+    preferred = _preferred_key_ports.get(host)
+    if preferred is None or preferred not in ports:
+        return ports
+    return (preferred, *(port for port in ports if port != preferred))
 
 
 def send_local_key(
@@ -52,23 +92,35 @@ def send_local_key(
     *,
     ports: tuple[int, ...] = LOCAL_KEY_PORTS,
     timeout: float = 2.0,
+    probe_timeout: float = DEFAULT_PROBE_TIMEOUT,
 ) -> int | None:
-    """POST the key. Return the HTTP status, or None if no port answered."""
+    """POST the key (GET fallback). Return the HTTP status, or None if silent.
+
+    Tries the last working port first. Non-sticky ports use a short probe
+    timeout so a closed 7778 does not burn the full timeout before 7779.
+    Only one method that returns 2xx is treated as success — never fire both
+    POST and GET once the TV has already accepted the key.
+    """
     name = key.strip()
     if not name or any(ch in name for ch in "/?#"):
         raise ValueError(f"invalid key: {key}")
     answered: int | None = None
-    for port in ports:
+    preferred = _preferred_key_ports.get(host)
+    for port in _key_port_order(host, ports):
+        # Sticky port keeps the full timeout; probes stay short.
+        port_timeout = float(timeout) if port == preferred else min(float(timeout), float(probe_timeout))
         url = f"http://{host}:{port}/{name}..controller"
         for method in ("POST", "GET"):
-            status = _request(url, method, timeout)
+            status = _request(url, method, port_timeout)
             if status is None:
+                # No TCP/HTTP answer — try the other port, not GET on a dead one.
                 break
             answered = status
             if 200 <= status < 300:
+                _preferred_key_ports[host] = port
                 _LOGGER.info("TV accepted %s on port %s", name, port)
                 return status
-        # This port is not the key service. Try the other one.
+        # This port answered but is not the key service. Try the other one.
     return answered
 
 

@@ -32,6 +32,7 @@ class _Body(io.BytesIO):
 
 def test_post_key_to_7778(proto_local_http, monkeypatch) -> None:
     seen: list[tuple[str, str]] = []
+    proto_local_http.clear_preferred_key_port()
 
     def fake_urlopen(request, timeout=0):
         del timeout
@@ -46,7 +47,53 @@ def test_post_key_to_7778(proto_local_http, monkeypatch) -> None:
     assert seen == [("http://192.0.2.10:7778/KEY_VOLUMEUP..controller", "POST")]
 
 
+def test_prefers_sticky_remoter_port(proto_local_http, monkeypatch) -> None:
+    """After 7779 works once, skip probing a dead 7778 on the next press."""
+    proto_local_http.clear_preferred_key_port()
+    seen: list[str] = []
+    timeouts: list[float] = []
+
+    def fake_urlopen(request, timeout=0):
+        timeouts.append(timeout)
+        seen.append(request.full_url)
+        if ":7779/" in request.full_url and request.get_method() == "POST":
+            return _Response(200)
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(proto_local_http.urllib.request, "urlopen", fake_urlopen)
+    assert proto_local_http.send_local_key("192.0.2.10", "KEY_VOLUMEUP", timeout=2.0) == 200
+    seen.clear()
+    timeouts.clear()
+    assert proto_local_http.send_local_key("192.0.2.10", "KEY_VOLUMEDOWN", timeout=2.0) == 200
+    assert seen[0].startswith("http://192.0.2.10:7779/")
+    assert all(":7778/" not in url for url in seen)
+    assert timeouts[0] == 2.0
+
+
+def test_remoter_reachable_checks_tcp(proto_local_http, monkeypatch) -> None:
+    opens: list[tuple] = []
+
+    class FakeSock:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_connect(addr, timeout=0):
+        opens.append((addr, timeout))
+        if addr[1] == 7779:
+            return FakeSock()
+        raise OSError("closed")
+
+    monkeypatch.setattr(proto_local_http.socket, "create_connection", fake_connect)
+    assert proto_local_http.remoter_reachable("192.0.2.10", timeout=0.2) is True
+    assert opens[0][0] == ("192.0.2.10", 7778)
+
+
 def test_falls_through_to_7779(proto_local_http, monkeypatch) -> None:
+    proto_local_http.clear_preferred_key_port()
+
     def fake_urlopen(request, timeout=0):
         del timeout
         if ":7779/" in request.full_url and request.get_method() == "POST":
