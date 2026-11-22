@@ -33,10 +33,11 @@ from .keys import (
     KEY_VOLUMEUP,
 )
 
+# No VOLUME_SET: the TV has no reliable absolute volume (MQTT changevolume is
+# ignored on many E7N / 爱家 builds). Use VOLUME_STEP (+/− → KEY_VOLUME*) only.
 SUPPORT = (
     MediaPlayerEntityFeature.TURN_ON
     | MediaPlayerEntityFeature.TURN_OFF
-    | MediaPlayerEntityFeature.VOLUME_SET
     | MediaPlayerEntityFeature.VOLUME_MUTE
     | MediaPlayerEntityFeature.VOLUME_STEP
     | MediaPlayerEntityFeature.SELECT_SOURCE
@@ -141,10 +142,6 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
 
     async def async_volume_down(self) -> None:
         await self.coordinator.client.async_send_key(KEY_VOLUMEDOWN)
-        self.async_write_ha_state()
-
-    async def async_set_volume_level(self, volume: float) -> None:
-        await self.coordinator.client.async_set_volume(int(round(volume * 100)))
         self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool) -> None:
