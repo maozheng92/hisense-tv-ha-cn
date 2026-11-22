@@ -18,6 +18,7 @@ import json
 import logging
 import random
 import re
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -44,6 +45,26 @@ CAPTURE_COMMAND = {
 }
 _MAX_IMAGE = 12 * 1024 * 1024
 _PACKAGE_RE = re.compile(r"^[A-Za-z][\w]*(\.[A-Za-z][\w]*)+$")
+
+
+def remoter_reachable(
+    host: str,
+    *,
+    ports: tuple[int, ...] = LOCAL_KEY_PORTS,
+    timeout: float = 0.4,
+) -> bool:
+    """True when the TV's LAN remoter TCP port accepts a connection.
+
+    Used after cold power-on: MQTT can be up before 7778/7779 is listening,
+    and the first KEY_SOURCE in a custom-source macro is otherwise dropped.
+    """
+    for port in ports:
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def send_local_key(

@@ -35,7 +35,13 @@ async def async_setup_entry(
 
 
 class HisenseTvRemoterButton(HisenseTvEntity, ButtonEntity):
-    """One 爱家 remoter key as a Home Assistant button."""
+    """One 爱家 remoter key as a Home Assistant button.
+
+    Hidden from the default UI so the device page stays clean, but still
+    enabled and callable from automations, scripts, and ``button.press``.
+    """
+
+    _attr_entity_registry_visible_default = False
 
     def __init__(
         self,
@@ -102,6 +108,7 @@ class HisenseTvCustomSourceButton(HisenseTvEntity, ButtonEntity):
     """One user-defined input switched by a remoter key sequence."""
 
     _attr_icon = "mdi:video-input-hdmi"
+    _attr_entity_registry_visible_default = False
 
     def __init__(
         self,

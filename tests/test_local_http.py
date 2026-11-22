@@ -30,6 +30,29 @@ class _Body(io.BytesIO):
         self.close()
 
 
+def test_remoter_reachable_uses_tcp(proto_local_http, monkeypatch) -> None:
+    seen: list[tuple[str, int]] = []
+
+    class FakeSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> None:
+            return None
+
+    def fake_connect(address, timeout=0):
+        del timeout
+        seen.append(address)
+        if address[1] == 7779:
+            return FakeSocket()
+        raise OSError("down")
+
+    monkeypatch.setattr(proto_local_http.socket, "create_connection", fake_connect)
+    assert proto_local_http.remoter_reachable("192.0.2.10") is True
+    assert seen[0] == ("192.0.2.10", 7778)
+    assert seen[1] == ("192.0.2.10", 7779)
+
+
 def test_post_key_to_7778(proto_local_http, monkeypatch) -> None:
     seen: list[tuple[str, str]] = []
 

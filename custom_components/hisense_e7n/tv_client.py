@@ -30,6 +30,11 @@ from .const import (
     MQTT_KEEPALIVE,
     RC_TCP_FAILED,
     RC_TLS_FAILED,
+    REMOTER_READY_POLL,
+    REMOTER_READY_TIMEOUT,
+    SOURCE_MENU_SETTLE,
+    SOURCE_OPEN_RETRIES,
+    SOURCE_OPEN_RETRY_DELAY,
 )
 from .credentials import (
     MqttCredentials,
@@ -44,6 +49,7 @@ from .local_http import (
     is_android_package,
     launch_local_app,
     push_voice,
+    remoter_reachable,
     send_local_key,
 )
 
@@ -213,6 +219,9 @@ class HisenseTvClient:
         self._connect_rc: int = -1
         self._lock = threading.Lock()
         self.ble: Any = None
+        # After cold power-on / MQTT reconnect, wait for the LAN remoter before
+        # the first KEY_SOURCE in a custom-source macro.
+        self._control_warmup = True
 
     @property
     def creds(self) -> MqttCredentials | None:
@@ -399,6 +408,7 @@ class HisenseTvClient:
             return
         self.state.available = False
         self.state.power_on = False
+        self._control_warmup = True
         self._notify()
 
     def _on_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
@@ -683,17 +693,69 @@ class HisenseTvClient:
         self.state.screenshot_path = f"/api/image/serve/{media_id}/original"
         self._notify()
 
-    def open_source(self) -> None:
-        """爱家 信号源: speak the command, then fall back to KEY_SOURCE."""
-        status = push_voice(self.host, "信号源")
-        if status is not None and 200 <= status < 300:
-            return
-        status = send_local_key(self.host, KEY_SOURCE)
-        if status is not None and 200 <= status < 300:
-            return
-        _LOGGER.info("Local source command was not accepted (%s); trying MQTT", status)
+    @staticmethod
+    def _is_source_key(key: str) -> bool:
+        kind = key.strip().lower()
+        if kind in {"source", "signal", "key_source"}:
+            return True
+        try:
+            return normalize_key(key) == KEY_SOURCE
+        except ValueError:
+            return False
+
+    def _wait_for_remoter(
+        self,
+        *,
+        pause: Callable[[float], None] = time.sleep,
+        timeout: float = REMOTER_READY_TIMEOUT,
+        poll: float = REMOTER_READY_POLL,
+    ) -> bool:
+        """Block until the LAN remoter accepts TCP, or until timeout."""
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while True:
+            if remoter_reachable(self.host):
+                return True
+            if time.monotonic() >= deadline:
+                _LOGGER.info(
+                    "LAN remoter on %s did not answer within %.1fs; continuing anyway",
+                    self.host,
+                    timeout,
+                )
+                return False
+            pause(max(0.05, float(poll)))
+
+    def open_source(
+        self,
+        *,
+        retries: int = 1,
+        retry_delay: float = SOURCE_OPEN_RETRY_DELAY,
+        pause: Callable[[float], None] = time.sleep,
+    ) -> bool:
+        """爱家 信号源: speak the command, then fall back to KEY_SOURCE.
+
+        Returns True when the local voice/HTTP path accepted the command.
+        After cold boot the first attempt often gets no answer; retry before
+        falling back to MQTT so custom-source macros keep their first press.
+        """
+        attempts = max(1, int(retries))
+        last_status: int | None = None
+        for attempt in range(attempts):
+            status = push_voice(self.host, "信号源")
+            if status is not None and 200 <= status < 300:
+                return True
+            last_status = status
+            status = send_local_key(self.host, KEY_SOURCE)
+            if status is not None and 200 <= status < 300:
+                return True
+            last_status = status if status is not None else last_status
+            if attempt + 1 < attempts:
+                pause(max(0.0, float(retry_delay)))
+        _LOGGER.info(
+            "Local source command was not accepted (%s); trying MQTT", last_status
+        )
         self._publish_action("ui_service", "sourcelist", "")
         self._publish_action("remote_service", "sendkey", KEY_SOURCE, as_key=True)
+        return False
 
     def run_key_sequence(
         self,
@@ -705,13 +767,32 @@ class HisenseTvClient:
         """Send remoter keys in order, with a short pause between them.
 
         Used for custom inputs such as ``KEY_SOURCE → KEY_RIGHT → KEY_OK``.
-        ``KEY_SOURCE`` goes through ``open_source`` via ``send_key``.
+        After cold power-on, wait for the LAN remoter and retry the first
+        source open so SOURCE is not skipped before RIGHT/OK.
         """
         wait = max(0.0, float(delay))
+        warmup = self._control_warmup
+        if warmup:
+            self._wait_for_remoter(pause=pause)
         for index, key in enumerate(keys):
             if index and wait:
                 pause(wait)
+            if self._is_source_key(key):
+                retries = SOURCE_OPEN_RETRIES if (warmup and index == 0) else 1
+                local_ok = self.open_source(retries=retries, pause=pause)
+                if warmup and index == 0:
+                    # Menu animation after the first successful open.
+                    settle = SOURCE_MENU_SETTLE if local_ok else max(
+                        SOURCE_MENU_SETTLE, wait
+                    )
+                    if settle:
+                        pause(settle)
+                    self._control_warmup = False
+                    warmup = False
+                continue
             self.send_key(key)
+        if warmup:
+            self._control_warmup = False
 
     def push_smart_image(self) -> None:
         """爱家 AI识图: voice 识图, then the app's function names."""

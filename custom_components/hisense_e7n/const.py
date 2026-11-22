@@ -29,6 +29,13 @@ CONF_CUSTOM_SOURCES = "custom_sources"
 CONF_CUSTOM_SOURCES_TEXT = "custom_sources_text"
 CONF_SOURCE_KEY_DELAY = "source_key_delay"
 DEFAULT_SOURCE_KEY_DELAY = 0.5
+# After cold power-on, MQTT often comes up before the LAN remoter accepts
+# 信号源. Retry the local open a few times instead of raising the global gap.
+SOURCE_OPEN_RETRIES = 4
+SOURCE_OPEN_RETRY_DELAY = 0.75
+SOURCE_MENU_SETTLE = 0.75
+REMOTER_READY_TIMEOUT = 8.0
+REMOTER_READY_POLL = 0.4
 CONF_CUSTOM_SOURCE_NAME = "custom_source_name"
 CONF_SEQUENCE_BUTTON = "sequence_button"
 CONF_SEQUENCE_ACTION = "sequence_action"
