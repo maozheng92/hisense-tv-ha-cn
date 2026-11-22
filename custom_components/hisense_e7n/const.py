@@ -29,13 +29,14 @@ CONF_CUSTOM_SOURCES = "custom_sources"
 CONF_CUSTOM_SOURCES_TEXT = "custom_sources_text"
 CONF_SOURCE_KEY_DELAY = "source_key_delay"
 DEFAULT_SOURCE_KEY_DELAY = 0.5
-# Volume steps are KEY_VOLUME* on the LAN remoter (no absolute slider).
-# HA hold-to-repeat and cold remoter otherwise drop presses.
-VOLUME_KEY_MIN_GAP = 0.18
-VOLUME_KEY_PAUSE = VOLUME_KEY_MIN_GAP
+# volumechange.volume_type from VIDAA (CaptainSolidus / RemoteNOW):
+# 0 = TV speakers, 1 = HDMI ARC/eARC (CEC), 2 = mute flag (sehaas) or BT on some sets.
+VOLUME_TYPE_TV = 0
+VOLUME_TYPE_ARC = 1
+VOLUME_TYPE_MUTE = 2
+# TV-speaker KEY_VOLUME* pacing (not a substitute for ARC CEC volume).
+VOLUME_KEY_PAUSE = 0.05
 VOLUME_KEY_IDLE_WARMUP = 1.5
-VOLUME_KEY_RETRIES = 2
-VOLUME_KEY_RETRY_DELAY = 0.12
 # When the current level is unknown, drive to 0 then climb (extra downs are no-ops).
 VOLUME_UNKNOWN_FLOOR_STEPS = 100
 # Wait for TCP 7778/7779 after power-on / MQTT reconnect before the first key.

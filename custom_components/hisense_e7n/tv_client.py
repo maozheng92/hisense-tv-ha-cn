@@ -33,10 +33,9 @@ from .const import (
     REMOTER_READY_POLL,
     REMOTER_READY_TIMEOUT,
     VOLUME_KEY_IDLE_WARMUP,
-    VOLUME_KEY_MIN_GAP,
     VOLUME_KEY_PAUSE,
-    VOLUME_KEY_RETRIES,
-    VOLUME_KEY_RETRY_DELAY,
+    VOLUME_TYPE_ARC,
+    VOLUME_TYPE_MUTE,
     VOLUME_UNKNOWN_FLOOR_STEPS,
 )
 from .credentials import (
@@ -157,6 +156,8 @@ class TvState:
     available: bool = False
     power_on: bool = False
     volume: int | None = None
+    # VIDAA volumechange volume_type: 0=TV speakers, 1=HDMI ARC/eARC, 2=mute/BT.
+    volume_type: int | None = None
     muted: bool = False
     statetype: str | None = None
     source_id: str | None = None
@@ -225,7 +226,6 @@ class HisenseTvClient:
         # After cold power-on / MQTT reconnect, wait for LAN remoter (7778/7779).
         self._control_warmup = True
         self._volume_lock = threading.Lock()
-        self._last_volume_key_at = 0.0
         self._last_remoter_ok_at = 0.0
 
     @property
@@ -266,10 +266,22 @@ class HisenseTvClient:
             return
         if not isinstance(payload, dict):
             return
-        # sehaas volumechange: type 0 is the level, type 2 is mute.
-        if payload.get("volume_type") in (2, "2"):
-            self.state.muted = str(payload.get("volume_value")) in {"1", "true", "True"}
-            return
+        raw_type = payload.get("volume_type")
+        volume_type: int | None
+        try:
+            volume_type = int(raw_type) if raw_type is not None else None
+        except (TypeError, ValueError):
+            volume_type = None
+        # sehaas: type 2 + 0/1 is mute. CaptainSolidus: type 0/1/2 = TV/ARC/BT level.
+        # Prefer mute when type 2 and value is only a boolean-ish flag.
+        if volume_type == VOLUME_TYPE_MUTE:
+            value = payload.get("volume_value")
+            if value is not None and str(value) in {"0", "1", "true", "True", "false", "False"}:
+                self.state.volume_type = VOLUME_TYPE_MUTE
+                self.state.muted = str(value) in {"1", "true", "True"}
+                return
+        if volume_type is not None:
+            self.state.volume_type = volume_type
         for key in ("volume_value", "volume", "vol"):
             if key in payload and payload[key] is not None:
                 try:
@@ -767,16 +779,77 @@ class HisenseTvClient:
                 return False
             pause(max(0.05, float(poll)))
 
-    def _note_volume_key(self, name: str) -> None:
-        """Keep a local estimate when remoter volume keys succeed."""
+    def _note_volume_delta(self, delta: int) -> None:
+        """Optimistic local level after a successful ±1 step."""
         if self.state.volume is None:
             return
-        if name == KEY_VOLUMEUP:
-            self.state.volume = min(100, int(self.state.volume) + 1)
-            self._notify()
-        elif name == KEY_VOLUMEDOWN:
-            self.state.volume = max(0, int(self.state.volume) - 1)
-            self._notify()
+        self.state.volume = max(0, min(100, int(self.state.volume) + int(delta)))
+        self._notify()
+
+    def _refresh_volume_state(self, pause: Callable[[float], None]) -> None:
+        try:
+            self._publish_action("platform_service", "getvolume", "")
+        except RuntimeError:
+            _LOGGER.debug("getvolume before volume step failed", exc_info=True)
+            return
+        pause(0.3)
+
+    def _is_arc_audio(self) -> bool:
+        """True when HDMI ARC/eARC is the active audio output (CEC volume)."""
+        return self.state.volume_type == VOLUME_TYPE_ARC
+
+    def _nudge_arc_volume(self, delta: int) -> bool:
+        """Step ARC/eARC volume via MQTT changevolume (relative ±1).
+
+        On ARC/eARC the TV does not take absolute levels: a payload above the
+        current value raises CEC volume by one, below lowers by one
+        (VIDAA / RemoteNOW; see HA community Hisense MQTT notes). KEY_VOLUME*
+        on the LAN remoter is unreliable in this mode. Prefer current±1 when
+        known; otherwise 100 / 0 always nudges ARC by one without a slider.
+        """
+        if delta == 0:
+            return True
+        current = self.state.volume
+        if current is not None:
+            tip = min(100, current + 1) if delta > 0 else max(0, current - 1)
+        else:
+            tip = 100 if delta > 0 else 0
+        try:
+            self._publish_action("platform_service", "changevolume", str(tip))
+        except RuntimeError:
+            _LOGGER.debug("ARC changevolume nudge failed", exc_info=True)
+            return False
+        self._note_volume_delta(1 if delta > 0 else -1)
+        try:
+            self._publish_action("platform_service", "getvolume", "")
+        except RuntimeError:
+            _LOGGER.debug("getvolume after ARC nudge failed", exc_info=True)
+        return True
+
+    def _send_volume_key_local(
+        self,
+        name: str,
+        *,
+        pause: Callable[[float], None] = time.sleep,
+    ) -> bool:
+        """TV-speaker volume: LAN KEY_VOLUME*, MQTT sendkey fallback."""
+        idle = time.monotonic() - self._last_remoter_ok_at
+        if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
+            self._wait_for_remoter(pause=pause)
+        status = send_local_key(self.host, name)
+        if status is not None and 200 <= status < 300:
+            self._last_remoter_ok_at = time.monotonic()
+            self._control_warmup = False
+            self._note_volume_delta(1 if name == KEY_VOLUMEUP else -1)
+            return True
+        _LOGGER.info("HTTP volume %s missed (status %s); trying MQTT sendkey", name, status)
+        try:
+            self._publish_action("remote_service", "sendkey", name, as_key=True)
+        except RuntimeError:
+            _LOGGER.debug("MQTT volume sendkey failed", exc_info=True)
+            return False
+        self._note_volume_delta(1 if name == KEY_VOLUMEUP else -1)
+        return True
 
     def _send_volume_step(
         self,
@@ -784,52 +857,20 @@ class HisenseTvClient:
         *,
         pause: Callable[[float], None] = time.sleep,
     ) -> bool:
-        """Deliver one KEY_VOLUME* so the TV actually steps.
+        """One media_player +/- step. ARC/eARC uses CEC changevolume; else KEY_*.
 
-        Dropped presses come from (1) remoter not listening yet after boot,
-        (2) probing a dead 7778 with a long timeout before 7779, (3) HA
-        hold-to-repeat firing faster than the remoter can accept, and
-        (4) a single HTTP miss with no retry. Serialize steps, warm up after
-        idle, enforce a minimum gap, retry local, then MQTT sendkey once.
-        Never send POST+GET duplicates after a 2xx, and do not reintroduce
-        absolute ``VOLUME_SET``.
+        No ``VOLUME_SET`` slider: UI stays on VOLUME_STEP only.
         """
         name = normalize_key(key)
         if name not in {KEY_VOLUMEUP, KEY_VOLUMEDOWN}:
             raise ValueError(f"not a volume key: {key}")
+        delta = 1 if name == KEY_VOLUMEUP else -1
         with self._volume_lock:
-            now = time.monotonic()
-            gap = VOLUME_KEY_MIN_GAP - (now - self._last_volume_key_at)
-            if gap > 0:
-                pause(gap)
-            idle = now - self._last_remoter_ok_at
-            if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
-                self._wait_for_remoter(pause=pause)
-            last_status: int | None = None
-            for attempt in range(max(1, VOLUME_KEY_RETRIES)):
-                status = send_local_key(self.host, name)
-                last_status = status
-                if status is not None and 200 <= status < 300:
-                    self._last_volume_key_at = time.monotonic()
-                    self._last_remoter_ok_at = self._last_volume_key_at
-                    self._control_warmup = False
-                    self._note_volume_key(name)
-                    return True
-                if attempt + 1 < VOLUME_KEY_RETRIES:
-                    pause(VOLUME_KEY_RETRY_DELAY)
-            _LOGGER.info(
-                "HTTP volume %s missed (status %s); trying MQTT sendkey",
-                name,
-                last_status,
-            )
-            try:
-                self._publish_action("remote_service", "sendkey", name, as_key=True)
-            except RuntimeError:
-                _LOGGER.debug("MQTT volume sendkey failed", exc_info=True)
-                return False
-            self._last_volume_key_at = time.monotonic()
-            self._note_volume_key(name)
-            return True
+            if self.state.volume_type is None:
+                self._refresh_volume_state(pause)
+            if self._is_arc_audio():
+                return self._nudge_arc_volume(delta)
+            return self._send_volume_key_local(name, pause=pause)
 
     def _press_volume_key(
         self,
@@ -839,13 +880,15 @@ class HisenseTvClient:
         pause: Callable[[float], None] = time.sleep,
         step_pause: float = VOLUME_KEY_PAUSE,
     ) -> bool:
-        """Send KEY_VOLUME* count times via the reliable volume-step path."""
-        del step_pause  # gap is enforced inside _send_volume_step
+        """Repeat volume steps (helper for absolute set_volume)."""
         if count <= 0:
             return True
-        for _ in range(count):
+        wait = max(0.0, float(step_pause))
+        for index in range(count):
             if not self._send_volume_step(key, pause=pause):
                 return False
+            if index + 1 < count and wait:
+                pause(wait)
         return True
 
     def _set_volume_by_keys(
@@ -855,20 +898,20 @@ class HisenseTvClient:
         pause: Callable[[float], None] = time.sleep,
         step_pause: float = VOLUME_KEY_PAUSE,
     ) -> bool:
-        """Move the TV volume with KEY_VOLUMEUP/DOWN. Return False if keys fail.
-
-        MQTT ``changevolume`` is a no-op on many E7N / 爱家 firmwares; the same
-        LAN remoter path used by the volume buttons is what actually works.
-        """
+        """Move toward an absolute level via ± steps (ARC-aware)."""
         current = self.state.volume
-        if current is None:
-            try:
-                self._publish_action("platform_service", "getvolume", "")
-            except RuntimeError:
-                _LOGGER.debug("getvolume before set_volume failed", exc_info=True)
-            else:
-                pause(0.35)
-                current = self.state.volume
+        if current is None or self.state.volume_type is None:
+            self._refresh_volume_state(pause)
+            current = self.state.volume
+        if self._is_arc_audio():
+            # ARC cannot seek absolutely; only ±1 per changevolume publish.
+            if current is None:
+                return False
+            delta = int(target) - int(current)
+            step = KEY_VOLUMEUP if delta > 0 else KEY_VOLUMEDOWN
+            return self._press_volume_key(
+                step, count=abs(delta), pause=pause, step_pause=step_pause
+            )
         if current is None:
             if not self._press_volume_key(
                 KEY_VOLUMEDOWN,
@@ -895,19 +938,18 @@ class HisenseTvClient:
         *,
         pause: Callable[[float], None] = time.sleep,
     ) -> None:
-        """Set absolute volume 0–100.
+        """Best-effort absolute volume for non-UI callers (no HA slider).
 
-        Prefer remoter ``KEY_VOLUME*`` steps (LAN HTTP, then MQTT sendkey). Fall
-        back to MQTT ``changevolume`` only when those keys cannot be delivered.
-        Always refresh via ``getvolume`` when MQTT is up so HA can reflect state.
+        ARC/eARC only supports ±1 via ``changevolume``; TV speakers use
+        ``KEY_VOLUME*``. Refresh ``getvolume`` afterward when MQTT is up.
         """
         target = max(0, min(100, int(volume)))
-        used_keys = self._set_volume_by_keys(target, pause=pause)
-        if not used_keys:
-            # sehaas / VIDAA absolute level — bare digit string, not JSON.
+        used = self._set_volume_by_keys(target, pause=pause)
+        if not used and not self._is_arc_audio():
             self._publish_action("platform_service", "changevolume", str(target))
-        self.state.volume = target
-        self._notify()
+        if not self._is_arc_audio():
+            self.state.volume = target
+            self._notify()
         try:
             self._publish_action("platform_service", "getvolume", "")
         except RuntimeError:

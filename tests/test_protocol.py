@@ -127,6 +127,10 @@ def test_volume_type_2_is_mute(proto_client) -> None:
     assert client.state.volume == 30
     client._apply_volume({"volume_type": 0, "volume_value": 12})
     assert client.state.volume == 12
+    assert client.state.volume_type == 0
+    client._apply_volume({"volume_type": 1, "volume_value": 18})
+    assert client.state.volume == 18
+    assert client.state.volume_type == 1
 
 
 def test_pairing_request_is_only_vidaa_app_connect(proto_client, proto_credentials) -> None:
@@ -220,12 +224,13 @@ def test_wol_packet_shape(proto_client, monkeypatch) -> None:
 
 
 def test_set_volume_uses_local_volume_keys(proto_client, proto_credentials, monkeypatch) -> None:
-    """Absolute helper steps KEY_VOLUME* on the LAN remoter; changevolume alone is ineffective."""
+    """TV speakers: absolute helper steps KEY_VOLUME* on the LAN remoter."""
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client._creds = proto_credentials.generate_dynamic_credentials(
         "aa:bb:cc:dd:ee:ff", timestamp=1
     )
     client.state.volume = 10
+    client.state.volume_type = 0
     client._control_warmup = False
     client._last_remoter_ok_at = 10_000.0
     published: list[tuple[str, str]] = []
@@ -265,25 +270,9 @@ def test_set_volume_falls_back_to_mqtt_changevolume(
         "aa:bb:cc:dd:ee:ff", timestamp=1
     )
     client.state.volume = 20
+    client.state.volume_type = 0
     client._control_warmup = False
     client._last_remoter_ok_at = 10_000.0
-    published: list[tuple[str, str]] = []
-
-    class FakeMqtt:
-        def publish(self, topic, body, qos=0, retain=False):
-            published.append((topic, body))
-
-            class Info:
-                rc = proto_client.mqtt.MQTT_ERR_SUCCESS
-
-                def wait_for_publish(self, timeout=None):
-                    return None
-
-            return Info()
-
-    client._client = FakeMqtt()
-    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
-    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: None)
     calls: list[tuple] = []
 
     def publish_action(service, action, payload, *, as_key=False):
@@ -291,6 +280,8 @@ def test_set_volume_falls_back_to_mqtt_changevolume(
         if action == "sendkey":
             raise RuntimeError("sendkey down")
 
+    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
+    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: None)
     monkeypatch.setattr(client, "_publish_action", publish_action)
     client.set_volume(35, pause=lambda _delay: None)
     assert ("platform_service", "changevolume", "35", False) in calls
@@ -301,6 +292,7 @@ def test_set_volume_falls_back_to_mqtt_changevolume(
 def test_volume_keys_update_tracked_level(proto_client, monkeypatch) -> None:
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client.state.volume = 40
+    client.state.volume_type = 0
     client._control_warmup = False
     client._last_remoter_ok_at = 10_000.0
     monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
@@ -311,48 +303,67 @@ def test_volume_keys_update_tracked_level(proto_client, monkeypatch) -> None:
     assert client.state.volume == 40
 
 
-def test_volume_step_retries_then_mqtt(proto_client, proto_credentials, monkeypatch) -> None:
+def test_arc_volume_step_uses_changevolume_not_keys(
+    proto_client, proto_credentials, monkeypatch
+) -> None:
+    """HDMI ARC/eARC: KEY_VOLUME* is flaky; CEC steps via changevolume ±1."""
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client._creds = proto_credentials.generate_dynamic_credentials(
         "aa:bb:cc:dd:ee:ff", timestamp=1
     )
-    client.state.volume = 5
-    client._control_warmup = False
-    client._last_remoter_ok_at = 10_000.0
-    attempts = {"n": 0}
+    client.state.volume = 11
+    client.state.volume_type = 1
+    keys: list[str] = []
     calls: list[tuple] = []
 
-    def flaky_local(host, key, **kwargs):
-        attempts["n"] += 1
-        return None
+    def publish_action(service, action, payload, *, as_key=False):
+        calls.append((service, action, payload, as_key))
+
+    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: keys.append(key) or 200)
+    monkeypatch.setattr(client, "_publish_action", publish_action)
+    assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
+    assert keys == []
+    assert ("platform_service", "changevolume", "12", False) in calls
+    assert client.state.volume == 12
+    calls.clear()
+    assert client._send_volume_step("KEY_VOLUMEDOWN", pause=lambda _delay: None) is True
+    assert ("platform_service", "changevolume", "11", False) in calls
+    assert client.state.volume == 11
+
+
+def test_arc_volume_step_without_known_level(proto_client, proto_credentials, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client._creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+    client.state.volume = None
+    client.state.volume_type = 1
+    calls: list[tuple] = []
+
+    def publish_action(service, action, payload, *, as_key=False):
+        calls.append((service, action, payload, as_key))
+
+    monkeypatch.setattr(client, "_publish_action", publish_action)
+    assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
+    assert ("platform_service", "changevolume", "100", False) in calls
+    assert client._send_volume_step("KEY_VOLUMEDOWN", pause=lambda _delay: None) is True
+    assert ("platform_service", "changevolume", "0", False) in calls
+
+
+def test_tv_speaker_volume_skips_arc_changevolume(proto_client, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.volume = 5
+    client.state.volume_type = 0
+    client._control_warmup = False
+    client._last_remoter_ok_at = 10_000.0
+    calls: list[tuple] = []
 
     def publish_action(service, action, payload, *, as_key=False):
         calls.append((service, action, payload, as_key))
 
     monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
-    monkeypatch.setattr(proto_client, "send_local_key", flaky_local)
-    monkeypatch.setattr(client, "_publish_action", publish_action)
-    assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
-    assert attempts["n"] == 2
-    assert ("remote_service", "sendkey", "KEY_VOLUMEUP", True) in calls
-    assert client.state.volume == 6
-
-
-def test_volume_step_warms_up_after_idle(proto_client, monkeypatch) -> None:
-    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
-    client._control_warmup = True
-    waited: list[bool] = []
-
-    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
     monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: 200)
-
-    original_wait = client._wait_for_remoter
-
-    def track_wait(*, pause=None, timeout=None, poll=None):
-        waited.append(True)
-        return original_wait(pause=pause or (lambda _d: None), timeout=0.01, poll=0.01)
-
-    monkeypatch.setattr(client, "_wait_for_remoter", track_wait)
-    client._send_volume_step("KEY_VOLUMEDOWN", pause=lambda _delay: None)
-    assert waited == [True]
-    assert client._control_warmup is False
+    monkeypatch.setattr(client, "_publish_action", publish_action)
+    client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None)
+    assert not any(action == "changevolume" for _s, action, _p, _k in calls)
+    assert client.state.volume == 6

@@ -33,8 +33,8 @@ from .keys import (
     KEY_VOLUMEUP,
 )
 
-# No VOLUME_SET: the TV has no reliable absolute volume (MQTT changevolume is
-# ignored on many E7N / 爱家 builds). Use VOLUME_STEP (+/− → KEY_VOLUME*) only.
+# No VOLUME_SET: ARC/eARC only supports ±1 via changevolume; TV speakers use
+# KEY_VOLUME*. Expose VOLUME_STEP (+/−) only — never a HA slider.
 SUPPORT = (
     MediaPlayerEntityFeature.TURN_ON
     | MediaPlayerEntityFeature.TURN_OFF
