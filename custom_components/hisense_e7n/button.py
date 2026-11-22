@@ -124,5 +124,4 @@ class HisenseTvCustomSourceButton(HisenseTvEntity, ButtonEntity):
         await self.coordinator.client.async_run_key_sequence(
             self._keys,
             delay=self.coordinator.source_key_delay,
-            source_name=self._source_name,
         )

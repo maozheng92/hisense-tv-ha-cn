@@ -65,69 +65,6 @@ CONNECT_PAYLOAD = {
     "device_type": "Mobile App",
 }
 
-_SOURCE_FLAG_KEYS = ("iscurrent", "is_current", "selected", "isselect", "is_select")
-_SOURCE_NAME_KEYS = (
-    "sourcename",
-    "source_name",
-    "displayname",
-    "display_name",
-    "input",
-    "input_name",
-    "sourceName",
-    "source_label",
-)
-_SOURCE_ID_KEYS = ("sourceid", "source_id", "sourceId", "inputid", "input_id")
-
-
-def _truthy_flag(value: Any) -> bool:
-    return value in (1, "1", True, "true", "True", "on", "ON")
-
-
-def _looks_like_input_name(name: str) -> bool:
-    text = name.strip()
-    if not text:
-        return False
-    key = text.lower()
-    if key in {"tv", "atv", "dtv", "av", "vga", "usb", "media", "hdmi"}:
-        return True
-    if key.startswith("hdmi") or key.startswith("arc") or "hdmi" in key:
-        return True
-    return any(token in text for token in ("电视", "机顶", "盒子", "信号源"))
-
-
-def _pick_mapped(data: dict[str, Any], keys: tuple[str, ...]) -> Any:
-    for key in keys:
-        if key in data and data[key] not in (None, ""):
-            return data[key]
-    return None
-
-
-def _extract_source(data: dict[str, Any]) -> tuple[str | None, str | None]:
-    """Read sourcename / sourceid from a VIDAA ui_service/state payload."""
-    name: Any = None
-    sid: Any = None
-    nested = data.get("source")
-    if isinstance(nested, dict):
-        name = _pick_mapped(nested, _SOURCE_NAME_KEYS) or nested.get("name")
-        sid = _pick_mapped(nested, _SOURCE_ID_KEYS) or nested.get("id")
-    elif isinstance(nested, str) and nested.strip():
-        name = nested
-    if not name:
-        name = _pick_mapped(data, _SOURCE_NAME_KEYS)
-    if sid is None:
-        sid = _pick_mapped(data, _SOURCE_ID_KEYS)
-    if not name:
-        maybe = data.get("name")
-        if isinstance(maybe, str) and maybe.strip():
-            kind = str(data.get("statetype") or "").lower()
-            if kind in {"app", "video", "livetv", "sourceswitch", "hdmi", "source"}:
-                name = maybe
-            elif _looks_like_input_name(maybe):
-                name = maybe
-    name_s = str(name).strip() if name not in (None, "") else None
-    sid_s = str(sid).strip() if sid not in (None, "") else None
-    return name_s or None, sid_s or None
-
 
 def _paho_client(client_id: str) -> mqtt.Client:
     callback_api = getattr(mqtt, "CallbackAPIVersion", None)
@@ -362,44 +299,7 @@ class HisenseTvClient:
         if mute is not None:
             self.state.muted = str(mute) in {"1", "true", "True", "on"} or mute is True
 
-    def _note_source(
-        self,
-        name: str | None,
-        source_id: str | None = None,
-        *,
-        notify: bool = False,
-    ) -> None:
-        changed = False
-        if name:
-            text = str(name).strip()
-            if text and text != self.state.source_name:
-                self.state.source_name = text
-                changed = True
-        if source_id:
-            sid = str(source_id).strip()
-            if sid and sid != self.state.source_id:
-                self.state.source_id = sid
-                changed = True
-        if changed:
-            _LOGGER.info(
-                "TV input source=%s id=%s type=%s",
-                self.state.source_name,
-                self.state.source_id,
-                self.state.statetype,
-            )
-        if notify and changed:
-            self._notify()
-
-    def _request_source_state(self) -> None:
-        for action in ("gettvstate", "sourcelist"):
-            try:
-                self._publish_action("ui_service", action, "")
-            except RuntimeError:
-                _LOGGER.debug("%s after source change failed", action, exc_info=True)
-
     def _apply_state(self, data: Any) -> None:
-        if isinstance(data, list) and data:
-            data = next((item for item in data if isinstance(item, dict)), data[0])
         if not isinstance(data, dict):
             if isinstance(data, str) and data:
                 self.state.statetype = data
@@ -413,7 +313,12 @@ class HisenseTvClient:
         elif isinstance(raw_state, str) and raw_state.strip():
             # Numeric ``state`` flags (0/1) are not a power statetype.
             label = raw_state
-        name, sid = _extract_source(data)
+        name = data.get("sourcename") or data.get("source_name") or data.get("displayname")
+        sid = data.get("sourceid") or data.get("source_id")
+        if name:
+            self.state.source_name = str(name)
+        if sid is not None:
+            self.state.source_id = str(sid)
         if label is not None:
             self.state.statetype = label
             kind = label.lower()
@@ -426,8 +331,7 @@ class HisenseTvClient:
                 "off",
             }
             if kind == "livetv":
-                name = data.get("channel_name") or name or "TV"
-        self._note_source(name, sid)
+                self.state.source_name = data.get("channel_name") or name or "TV"
         self._apply_volume(data)
         self._maybe_learn_tv_mac(data)
 
@@ -448,22 +352,10 @@ class HisenseTvClient:
     def _apply_sources(self, data: Any) -> None:
         items = data
         if isinstance(data, dict):
-            items = (
-                data.get("source_list")
-                or data.get("sourcelist")
-                or data.get("list")
-                or data.get("sources")
-            )
-            if items is None and (
-                "sourceid" in data or "sourcename" in data or "source_id" in data
-            ):
-                items = [data]
-            if items is None:
-                items = []
+            items = data.get("source_list") or data.get("sourcelist") or data.get("list") or []
         if not isinstance(items, list):
             return
         sources: list[dict[str, str]] = []
-        current: tuple[str, str] | None = None
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -471,20 +363,9 @@ class HisenseTvClient:
             name = item.get("sourcename", item.get("source_name", item.get("name", sid)))
             if sid is None:
                 continue
-            sid_s = str(sid)
-            name_s = str(name)
-            sources.append({"id": sid_s, "name": name_s})
-            if any(_truthy_flag(item.get(key)) for key in _SOURCE_FLAG_KEYS):
-                current = (name_s, sid_s)
+            sources.append({"id": str(sid), "name": str(name)})
         if sources:
             self.state.sources = sources
-            if current:
-                self._note_source(current[0], current[1])
-            elif self.state.source_id:
-                for item in sources:
-                    if item["id"] == self.state.source_id:
-                        self._note_source(item["name"], item["id"])
-                        break
 
     def _apply_apps(self, data: Any) -> None:
         apps = normalize_apps(data)
@@ -523,13 +404,9 @@ class HisenseTvClient:
             self.state.needs_pin = False
             self._set_loop_event(self._token_event)
             self._set_loop_event(self._pin_event)
-        elif (
-            topic.endswith("/data/state")
-            or topic.endswith("/ui_service/state")
-            or topic.endswith("/data/gettvstate")
-        ):
+        elif topic.endswith("/data/state") or topic.endswith("/ui_service/state"):
             self._apply_state(data)
-        elif topic.endswith("/data/sourcelist") or topic.endswith("/ui_service/sourcelist"):
+        elif topic.endswith("/data/sourcelist"):
             self._apply_sources(data)
         elif "applist" in topic:
             self._apply_apps(data)
@@ -556,11 +433,6 @@ class HisenseTvClient:
                 client.subscribe(topic, qos=0)
         self._set_loop_event(self._connected_event)
         self._notify()
-        if self.state.access_token or self.state.already_paired:
-            try:
-                self.refresh_status()
-            except Exception:  # noqa: BLE001 — pairing dialog must not depend on this
-                _LOGGER.debug("MQTT connect status refresh failed", exc_info=True)
 
     def _cancel_offline_timer(self) -> None:
         with self._offline_lock:
@@ -935,7 +807,6 @@ class HisenseTvClient:
         *,
         delay: float = DEFAULT_SOURCE_KEY_DELAY,
         pause: Callable[[float], None] = time.sleep,
-        source_name: str | None = None,
     ) -> None:
         """Send remoter keys in order, with a short pause between them.
 
@@ -947,9 +818,6 @@ class HisenseTvClient:
             if index and wait:
                 pause(wait)
             self.send_key(key)
-        if source_name:
-            self._note_source(source_name, notify=True)
-            self._request_source_state()
 
     def push_smart_image(self) -> None:
         """爱家 AI识图: voice 识图, then the app's function names."""
@@ -1147,14 +1015,6 @@ class HisenseTvClient:
         if source_name:
             payload["sourcename"] = source_name
         self._publish_action("ui_service", "changesource", payload)
-        label = source_name
-        if not label:
-            for item in self.state.sources:
-                if item.get("id") == str(source_id):
-                    label = item.get("name")
-                    break
-        self._note_source(label, str(source_id), notify=True)
-        self._request_source_state()
 
     def launch_app(
         self,
@@ -1179,31 +1039,29 @@ class HisenseTvClient:
                         break
         if pkg:
             status = launch_local_app(self.host, pkg)
-            if status is None or not (200 <= status < 300):
-                _LOGGER.info("Local 电视打开 did not take %s (status %s); trying MQTT", pkg, status)
-                payload = {
-                    "name": name or pkg,
-                    "url": pkg,
-                    "appId": pkg,
-                    "urlType": 0,
-                    "storeType": int(store_type),
-                    "isLocalApp": 1,
-                    "has_detail_page": 0,
-                    "type": 0,
-                }
-                self._publish_action("ui_service", "launchapp", payload)
-        else:
+            if status is not None and 200 <= status < 300:
+                return
+            _LOGGER.info("Local 电视打开 did not take %s (status %s); trying MQTT", pkg, status)
             payload = {
-                "name": name,
-                "url": app_url,
-                "appId": app_url,
-                "urlType": int(url_type),
+                "name": name or pkg,
+                "url": pkg,
+                "appId": pkg,
+                "urlType": 0,
                 "storeType": int(store_type),
+                "isLocalApp": 1,
+                "has_detail_page": 0,
+                "type": 0,
             }
             self._publish_action("ui_service", "launchapp", payload)
-        if name:
-            self._note_source(name, notify=True)
-            self._request_source_state()
+            return
+        payload = {
+            "name": name,
+            "url": app_url,
+            "appId": app_url,
+            "urlType": int(url_type),
+            "storeType": int(store_type),
+        }
+        self._publish_action("ui_service", "launchapp", payload)
 
     def refresh_apps(self) -> None:
         """Ask the TV for 我的应用. The reply arrives on the applist data topic."""
@@ -1220,15 +1078,8 @@ class HisenseTvClient:
         )
 
     def refresh_status(self) -> None:
-        for service, action in (
-            ("ui_service", "gettvstate"),
-            ("ui_service", "sourcelist"),
-            ("platform_service", "getvolume"),
-        ):
-            try:
-                self._publish_action(service, action, "")
-            except RuntimeError:
-                _LOGGER.debug("%s failed", action, exc_info=True)
+        self._publish_action("ui_service", "gettvstate", "")
+        self._publish_action("platform_service", "getvolume", "")
         self.refresh_apps()
 
     def _refresh_control_password(self) -> None:
@@ -1299,11 +1150,9 @@ class HisenseTvClient:
         keys: list[str],
         *,
         delay: float = DEFAULT_SOURCE_KEY_DELAY,
-        source_name: str | None = None,
     ) -> None:
         await asyncio.get_running_loop().run_in_executor(
-            None,
-            lambda: self.run_key_sequence(keys, delay=delay, source_name=source_name),
+            None, lambda: self.run_key_sequence(keys, delay=delay)
         )
 
     async def async_push_smart_image(self) -> None:

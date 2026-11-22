@@ -103,8 +103,6 @@ _MOBILE_DATA = (
 _BROADCASTS = (
     "/remoteapp/mobile/broadcast/ui_service/state",
     "/remoteapp/mobile/broadcast/ui_service/data/applist",
-    "/remoteapp/mobile/broadcast/ui_service/data/sourcelist",
-    "/remoteapp/mobile/broadcast/ui_service/sourcelist",
     "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep",
     "/remoteapp/mobile/broadcast/platform_service/data/volumechange",
     "/remoteapp/mobile/broadcast/platform_service/actions/volumechange",

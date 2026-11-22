@@ -111,7 +111,11 @@ def test_volume_button_form_errors(proto_power) -> None:
     errors = proto_power.volume_button_form_errors(
         {"volume_down_button": "media_player.tv"}
     )
-    assert errors["volume_down_button"] == "volume_button_invalid"
+    assert errors["音量减按钮"] == "volume_button_invalid"
+    errors = proto_power.volume_button_form_errors(
+        {"音量加按钮": "media_player.tv"}
+    )
+    assert errors["音量加按钮"] == "volume_button_invalid"
 
 
 def test_clean_volume_button_fields(proto_power) -> None:
@@ -123,6 +127,26 @@ def test_clean_volume_button_fields(proto_power) -> None:
     )
     assert cleaned["volume_up_button"] == "button.ir_vol_up"
     assert cleaned["volume_down_button"] == ""
+    cleaned = proto_power.clean_power_on_fields(
+        {
+            "音量加按钮": " button.ir_vol_up ",
+            "音量减按钮": "switch.vol_down",
+        }
+    )
+    assert cleaned["volume_up_button"] == "button.ir_vol_up"
+    assert cleaned["volume_down_button"] == "switch.vol_down"
+    assert "音量加按钮" not in cleaned
+
+
+def test_volume_form_suggested_keeps_submitted_value(proto_power) -> None:
+    suggested = proto_power.volume_form_suggested(
+        {
+            "volume_up_button": "button.saved",
+            "音量加按钮": "button.just_picked",
+        }
+    )
+    assert suggested["音量加按钮"] == "button.just_picked"
+    assert "volume_up_button" not in suggested
 
 
 def test_unsupported_domain_raises(proto_power) -> None:

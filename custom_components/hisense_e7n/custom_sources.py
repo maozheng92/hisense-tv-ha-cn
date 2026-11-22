@@ -189,27 +189,3 @@ def find_custom_source(
         if item.get("name") == needle:
             return item
     return None
-
-
-def normalize_source_label(name: str) -> str:
-    """HDMI 1 / HDMI_1 / hdmi1 → hdmi1 for matching MQTT vs custom names."""
-    return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", name.strip().lower())
-
-
-def match_source_name(reported: str | None, names: list[str]) -> str | None:
-    """Map a TV-reported source onto a name from the media_player list."""
-    if not reported:
-        return None
-    needle = str(reported).strip()
-    if not needle:
-        return None
-    for name in names:
-        if name == needle:
-            return name
-    key = normalize_source_label(needle)
-    if not key:
-        return None
-    for name in names:
-        if normalize_source_label(name) == key:
-            return name
-    return None

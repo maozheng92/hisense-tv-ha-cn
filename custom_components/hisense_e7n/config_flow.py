@@ -43,6 +43,8 @@ from .const import (
     CONF_POWER_ON_REMOTE,
     CONF_VOLUME_DOWN_BUTTON,
     CONF_VOLUME_UP_BUTTON,
+    FORM_VOLUME_DOWN_BUTTON,
+    FORM_VOLUME_UP_BUTTON,
     CONF_SEQUENCE_ACTION,
     CONF_SEQUENCE_BUTTON,
     CONF_SOURCE_KEY_DELAY,
@@ -78,6 +80,7 @@ from .power import (
     normalize_power_on_entity,
     power_on_form_errors,
     volume_button_form_errors,
+    volume_form_suggested,
 )
 from .tv_client import HisenseTvClient, classify_connect_error
 
@@ -139,8 +142,8 @@ def _power_on_fields() -> dict[Any, Any]:
             TextSelectorConfig(type="text")
         ),
         vol.Optional(CONF_POWER_ON_DEVICE): TextSelector(TextSelectorConfig(type="text")),
-        vol.Optional(CONF_VOLUME_UP_BUTTON): VOLUME_BUTTON_SELECTOR,
-        vol.Optional(CONF_VOLUME_DOWN_BUTTON): VOLUME_BUTTON_SELECTOR,
+        vol.Optional(FORM_VOLUME_UP_BUTTON): VOLUME_BUTTON_SELECTOR,
+        vol.Optional(FORM_VOLUME_DOWN_BUTTON): VOLUME_BUTTON_SELECTOR,
     }
 
 
@@ -264,7 +267,9 @@ class HisenseE7NConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         schema = _user_schema()
         if user_input:
-            schema = self.add_suggested_values_to_schema(schema, user_input)
+            schema = self.add_suggested_values_to_schema(
+                schema, volume_form_suggested(user_input)
+            )
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
@@ -385,7 +390,7 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
                 return self.async_show_form(
                     step_id="basic",
                     data_schema=self.add_suggested_values_to_schema(
-                        self._basic_schema(data), merged
+                        self._basic_schema(data), volume_form_suggested(merged)
                     ),
                     errors=form_errors,
                 )
@@ -415,7 +420,7 @@ class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="basic",
             data_schema=self.add_suggested_values_to_schema(
-                self._basic_schema(data), suggested
+                self._basic_schema(data), volume_form_suggested(suggested)
             ),
         )
 

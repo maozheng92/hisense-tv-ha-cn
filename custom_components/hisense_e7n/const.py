@@ -21,6 +21,10 @@ CONF_POWER_ON_COMMAND = "power_on_command"
 CONF_POWER_ON_DEVICE = "power_on_device"
 CONF_VOLUME_UP_BUTTON = "volume_up_button"
 CONF_VOLUME_DOWN_BUTTON = "volume_down_button"
+# EntitySelector labels fall back to the schema key. Keep storage keys
+# English; show Chinese on the form so HA does not print volume_up_button.
+FORM_VOLUME_UP_BUTTON = "音量加按钮"
+FORM_VOLUME_DOWN_BUTTON = "音量减按钮"
 POWER_ON_MODE_BUTTON = "button"
 POWER_ON_MODE_REMOTE = "remote"
 POWER_ON_MODE_WOL = "wol"
