@@ -2,20 +2,51 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.components import persistent_notification
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .button_visibility import should_hide_button_registry_entry
 from .const import DATA_COORDINATOR, DOMAIN
 from .coordinator import HisenseTvCoordinator
 from .custom_sources import custom_source_slug
 from .entity import HisenseTvEntity
 from .keys import AIJIA_REMOTER_BUTTONS, KEY_POWER, RemoterButton
 from .screenshot_store import async_save_screenshot
+
+_LOGGER = logging.getLogger(__name__)
+
+
+@callback
+def async_hide_existing_buttons(hass: HomeAssistant, entry: ConfigEntry) -> int:
+    """Hide this entry's button entities in the registry without disabling them."""
+    registry = er.async_get(hass)
+    hidden = 0
+    for entity_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if not should_hide_button_registry_entry(
+            domain=entity_entry.domain,
+            platform=entity_entry.platform,
+            hidden_by=entity_entry.hidden_by,
+        ):
+            continue
+        registry.async_update_entity(
+            entity_entry.entity_id,
+            hidden_by=er.RegistryEntryHider.INTEGRATION,
+        )
+        hidden += 1
+    if hidden:
+        _LOGGER.info(
+            "Hid %s existing remoter/custom-source button(s) for %s",
+            hidden,
+            entry.entry_id,
+        )
+    return hidden
 
 
 async def async_setup_entry(
@@ -32,6 +63,8 @@ async def async_setup_entry(
         for source in coordinator.custom_sources
     )
     async_add_entities(entities)
+    # New entities honour visible_default=False; migrate older visible rows.
+    async_hide_existing_buttons(hass, entry)
 
 
 class HisenseTvRemoterButton(HisenseTvEntity, ButtonEntity):
