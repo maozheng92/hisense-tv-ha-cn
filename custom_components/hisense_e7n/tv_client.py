@@ -790,65 +790,33 @@ class HisenseTvClient:
         """True when HDMI ARC/eARC is the active audio output (CEC volume)."""
         return self.state.volume_type == VOLUME_TYPE_ARC
 
-    def _nudge_volume_mqtt(self, delta: int) -> bool:
-        """Step volume via MQTT ``changevolume`` (VIDAA platform_service).
+    def _publish_changevolume_tip(self, tip: str) -> bool:
+        """Publish changevolume on the session id and the ``$normal`` twin.
 
-        On HDMI ARC/eARC this is a CEC relative nudge: any payload above the
-        current level raises volume by one, below lowers by one. On TV speakers
-        the same publish sets the absolute level to that value, so current±1
-        is still a one-step change. Prefer current±1 when known; otherwise
-        100 / 0 (safe ARC nudge when getvolume has not reported yet).
+        Community ARC notes used ``{mac}$normal``; this TV session is
+        ``$vidaa_common`` (see HA logs). Try both when the prefix differs.
         """
-        if delta == 0:
-            return True
-        current = self.state.volume
-        if current is not None:
-            tip = min(100, current + 1) if delta > 0 else max(0, current - 1)
-        else:
-            tip = 100 if delta > 0 else 0
+        sent = 0
         try:
-            self._publish_action("platform_service", "changevolume", str(tip))
+            self._publish_action("platform_service", "changevolume", tip)
+            sent += 1
         except RuntimeError:
-            _LOGGER.debug("changevolume nudge failed", exc_info=True)
-            return False
-        _LOGGER.info(
-            "MQTT changevolume nudge %s (volume_type=%s, was=%s)",
-            tip,
-            self.state.volume_type,
-            current,
-        )
-        self._note_volume_delta(1 if delta > 0 else -1)
-        try:
-            # Best-effort refresh; do not block the next press on a reply.
-            self._publish_action("platform_service", "getvolume", "")
-        except RuntimeError:
-            _LOGGER.debug("getvolume after changevolume failed", exc_info=True)
-        return True
-
-    def _send_volume_key_local(
-        self,
-        name: str,
-        *,
-        pause: Callable[[float], None] = time.sleep,
-    ) -> bool:
-        """LAN KEY_VOLUME* / MQTT sendkey — TV speakers only fallback."""
-        idle = time.monotonic() - self._last_remoter_ok_at
-        if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
-            self._wait_for_remoter(pause=pause)
-        status = send_local_key(self.host, name)
-        if status is not None and 200 <= status < 300:
-            self._last_remoter_ok_at = time.monotonic()
-            self._control_warmup = False
-            self._note_volume_delta(1 if name == KEY_VOLUMEUP else -1)
-            return True
-        _LOGGER.info("HTTP volume %s missed (status %s); trying MQTT sendkey", name, status)
-        try:
-            self._publish_action("remote_service", "sendkey", name, as_key=True)
-        except RuntimeError:
-            _LOGGER.debug("MQTT volume sendkey failed", exc_info=True)
-            return False
-        self._note_volume_delta(1 if name == KEY_VOLUMEUP else -1)
-        return True
+            _LOGGER.debug("changevolume on session id failed", exc_info=True)
+        creds = self._creds
+        if creds is not None and "$" in (creds.client_id or ""):
+            prefix, _, flavor = creds.client_id.partition("$")
+            alt = "normal" if flavor != "normal" else "vidaa_common"
+            alt_id = f"{prefix}${alt}"
+            if alt_id != creds.client_id:
+                try:
+                    self._publish(
+                        f"/remoteapp/tv/platform_service/{alt_id}/actions/changevolume",
+                        tip,
+                    )
+                    sent += 1
+                except RuntimeError:
+                    _LOGGER.debug("changevolume on %s failed", alt_id, exc_info=True)
+        return sent > 0
 
     def _send_volume_step(
         self,
@@ -856,14 +824,23 @@ class HisenseTvClient:
         *,
         pause: Callable[[float], None] = time.sleep,
     ) -> bool:
-        """One media_player +/- step via MQTT changevolume (not KEY-first).
+        """One media_player +/- step using KEY paths that the logs prove matter.
 
-        HA debug log ``home-assistant_hisense_e7n_2026-11-22T07-27-38.281Z``
-        showed every press as ``getvolume`` then ``KEY_VOLUMEUP`` accepted on
-        TCP 7778 — and **never** ``changevolume``. On eARC that HTTP ACK does
-        not move CEC volume (~1/10 presses). ``volume_type`` stayed unset, so
-        the old ARC branch never ran. Protocol fix: always publish
-        ``changevolume`` for +/-; KEY only if MQTT publish fails.
+        Compare HA logs:
+
+        - ``…07-27-38…`` (partial eARC effect): ``KEY_VOLUMEUP`` accepted on
+          TCP 7778 — never ``changevolume``.
+        - ``…07-35-29…`` (zero eARC effect): only ``changevolume -> 100`` with
+          ``volume_type=None, was=None`` — TV ignored it completely.
+
+        So ``changevolume→100`` alone is not a working protocol on this
+        ``$vidaa_common`` session. Restore KEY delivery:
+
+        1. MQTT ``remote_service/sendkey`` ``KEY_VOLUME*`` (CEC pass-through;
+           must not be skipped when LAN HTTP returns 200).
+        2. LAN ``KEY_VOLUME*`` on 7778/7779 (07-27 path).
+        3. Optional ``changevolume`` only when the level is known (never the
+           unknown→100 spam from 07-35).
 
         No ``VOLUME_SET`` slider.
         """
@@ -872,9 +849,46 @@ class HisenseTvClient:
             raise ValueError(f"not a volume key: {key}")
         delta = 1 if name == KEY_VOLUMEUP else -1
         with self._volume_lock:
-            if self._nudge_volume_mqtt(delta):
+            delivered = False
+
+            # 1) MQTT sendkey — missing from both prior logs; needed for CEC.
+            try:
+                self._publish_action("remote_service", "sendkey", name, as_key=True)
+                delivered = True
+                _LOGGER.info("volume step MQTT sendkey %s", name)
+            except RuntimeError:
+                _LOGGER.debug("volume step MQTT sendkey failed", exc_info=True)
+
+            # 2) LAN remoter KEY — 07-27 path (HTTP ACK ≠ always CEC, but it
+            #    sometimes moved eARC; 07-35 removed this and got zero effect).
+            idle = time.monotonic() - self._last_remoter_ok_at
+            if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
+                self._wait_for_remoter(pause=pause)
+            status = send_local_key(self.host, name)
+            if status is not None and 200 <= status < 300:
+                delivered = True
+                self._last_remoter_ok_at = time.monotonic()
+                self._control_warmup = False
+                _LOGGER.info("volume step LAN %s on remoter (status %s)", name, status)
+            else:
+                _LOGGER.info("volume step LAN %s missed (status %s)", name, status)
+
+            # 3) changevolume only with a known level — never unknown→100.
+            current = self.state.volume
+            if current is not None:
+                tip = min(100, current + 1) if delta > 0 else max(0, current - 1)
+                if tip != current:
+                    if self._publish_changevolume_tip(str(tip)):
+                        _LOGGER.info(
+                            "volume step changevolume %s (volume_type=%s)",
+                            tip,
+                            self.state.volume_type,
+                        )
+
+            if delivered:
+                self._note_volume_delta(delta)
                 return True
-            return self._send_volume_key_local(name, pause=pause)
+            return False
 
     def _press_volume_key(
         self,

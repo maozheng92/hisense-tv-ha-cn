@@ -33,7 +33,7 @@ from .keys import (
     KEY_VOLUMEUP,
 )
 
-# No VOLUME_SET: +/- publishes MQTT changevolume (±1 / CEC on eARC). Expose
+# No VOLUME_SET: +/- uses MQTT sendkey KEY_VOLUME* + LAN remoter (eARC).
 # VOLUME_STEP only — never a HA slider.
 SUPPORT = (
     MediaPlayerEntityFeature.TURN_ON
