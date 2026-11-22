@@ -22,7 +22,13 @@ from .const import (
     POWER_ON_MODE_WOL,
 )
 from .custom_sources import normalize_custom_sources
-from .power import infer_power_on_mode, normalize_power_on_entity, power_on_call
+from .keys import KEY_VOLUMEDOWN, KEY_VOLUMEUP, normalize_key
+from .power import (
+    entity_press_call,
+    infer_power_on_mode,
+    normalize_power_on_entity,
+    power_on_call,
+)
 from .tv_client import HisenseTvClient, TvState
 
 _LOGGER = logging.getLogger(__name__)
@@ -54,6 +60,8 @@ class HisenseTvCoordinator(DataUpdateCoordinator[TvState]):
         self.power_on_remote: str | None = None
         self.power_on_command = DEFAULT_POWER_ON_COMMAND
         self.power_on_device = ""
+        self.volume_up_button: str | None = None
+        self.volume_down_button: str | None = None
         self.custom_sources: list[dict] = []
         self.source_key_delay = DEFAULT_SOURCE_KEY_DELAY
         self._pin_notified = False
@@ -75,6 +83,53 @@ class HisenseTvCoordinator(DataUpdateCoordinator[TvState]):
         self.power_on_command = (command or "").strip() or DEFAULT_POWER_ON_COMMAND
         self.power_on_device = (device or "").strip()
         self.power_on_mode = infer_power_on_mode(mode, button, remote, mac)
+
+    def configure_volume_buttons(
+        self,
+        *,
+        volume_up: str | None,
+        volume_down: str | None,
+    ) -> None:
+        """Optional HA buttons that replace LAN KEY_VOLUME* for +/-."""
+        self.volume_up_button = normalize_power_on_entity(volume_up)
+        self.volume_down_button = normalize_power_on_entity(volume_down)
+
+    async def async_send_key(self, key: str) -> None:
+        name = normalize_key(key)
+        if name == KEY_VOLUMEUP:
+            await self.async_volume_step(1)
+            return
+        if name == KEY_VOLUMEDOWN:
+            await self.async_volume_step(-1)
+            return
+        await self.client.async_send_key(key)
+
+    async def async_volume_step(self, delta: int) -> None:
+        """Press a configured volume button, else LAN KEY_VOLUME*."""
+        entity = self.volume_up_button if delta > 0 else self.volume_down_button
+        call = entity_press_call(entity)
+        if call is not None:
+            _LOGGER.info(
+                "Volume %s via %s.%s %s",
+                "up" if delta > 0 else "down",
+                call.domain,
+                call.service,
+                call.data.get(ATTR_ENTITY_ID),
+            )
+            try:
+                await self.hass.services.async_call(
+                    call.domain,
+                    call.service,
+                    call.data,
+                    blocking=True,
+                )
+            except HomeAssistantError:
+                _LOGGER.exception(
+                    "Volume button %s.%s failed", call.domain, call.service
+                )
+            return
+        key = KEY_VOLUMEUP if delta > 0 else KEY_VOLUMEDOWN
+        await self.client.async_send_key(key)
 
     def configure_custom_sources(
         self,

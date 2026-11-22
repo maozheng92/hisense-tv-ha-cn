@@ -19,6 +19,12 @@ CONF_POWER_ON_MODE = "power_on_mode"
 CONF_POWER_ON_REMOTE = "power_on_remote"
 CONF_POWER_ON_COMMAND = "power_on_command"
 CONF_POWER_ON_DEVICE = "power_on_device"
+CONF_VOLUME_UP_BUTTON = "volume_up_button"
+CONF_VOLUME_DOWN_BUTTON = "volume_down_button"
+# EntitySelector labels fall back to the schema key. Keep storage keys
+# English; show Chinese on the form so HA does not print volume_up_button.
+FORM_VOLUME_UP_BUTTON = "音量加按钮"
+FORM_VOLUME_DOWN_BUTTON = "音量减按钮"
 POWER_ON_MODE_BUTTON = "button"
 POWER_ON_MODE_REMOTE = "remote"
 POWER_ON_MODE_WOL = "wol"
@@ -37,8 +43,27 @@ LEGACY_SOURCE_KEY_DELAYS = (0.5, 0.25)
 SOURCE_OPEN_RETRIES = 4
 SOURCE_OPEN_RETRY_DELAY = 0.75
 SOURCE_MENU_SETTLE = 0.75
+# Wait for TCP 7778/7779 after power-on / MQTT reconnect before the first key.
 REMOTER_READY_TIMEOUT = 8.0
 REMOTER_READY_POLL = 0.4
+# Probe the non-sticky remoter port quickly so a dead 7778 does not stall 7779.
+REMOTER_PROBE_TIMEOUT = 0.35
+# volumechange.volume_type from VIDAA (CaptainSolidus / RemoteNOW):
+# 0 = TV speakers, 1 = HDMI ARC/eARC (CEC), 2 = mute flag (sehaas) or BT on some sets.
+VOLUME_TYPE_TV = 0
+VOLUME_TYPE_ARC = 1
+VOLUME_TYPE_MUTE = 2
+# TV-speaker KEY_VOLUME* pacing (not a substitute for ARC CEC volume).
+VOLUME_KEY_PAUSE = 0.05
+VOLUME_KEY_IDLE_WARMUP = 1.5
+# eARC CEC: one LAN KEY_VOLUME per press (MQTT sendkey does not move volume).
+# Dual MQTT+LAN (15:51) flooded CEC. 1.22.9 LAN retry jumped +2 — reverted.
+VOLUME_CEC_GAP = 0.9
+# When the current level is unknown, drive to 0 then climb (extra downs are no-ops).
+VOLUME_UNKNOWN_FLOOR_STEPS = 100
+# LAN remoter KEY (volume +/-) can drop MQTT 36669 for a moment. Do not flip
+# media_player on→off→on until the broker stays down this long.
+MQTT_DISCONNECT_GRACE = 3.0
 CONF_CUSTOM_SOURCE_NAME = "custom_source_name"
 CONF_SOURCE_NAME_ACTION = "source_name_action"
 CONF_SEQUENCE_BUTTON = "sequence_button"

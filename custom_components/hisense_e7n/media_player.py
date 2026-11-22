@@ -33,10 +33,11 @@ from .keys import (
     KEY_VOLUMEUP,
 )
 
+# No VOLUME_SET: +/- uses MQTT sendkey KEY_VOLUME* + LAN remoter (eARC).
+# VOLUME_STEP only — never a HA slider.
 SUPPORT = (
     MediaPlayerEntityFeature.TURN_ON
     | MediaPlayerEntityFeature.TURN_OFF
-    | MediaPlayerEntityFeature.VOLUME_SET
     | MediaPlayerEntityFeature.VOLUME_MUTE
     | MediaPlayerEntityFeature.VOLUME_STEP
     | MediaPlayerEntityFeature.SELECT_SOURCE
@@ -136,18 +137,18 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         await self.coordinator.client.async_turn_off()
 
     async def async_volume_up(self) -> None:
-        await self.coordinator.client.async_send_key(KEY_VOLUMEUP)
+        await self.coordinator.async_send_key(KEY_VOLUMEUP)
+        self.async_write_ha_state()
 
     async def async_volume_down(self) -> None:
-        await self.coordinator.client.async_send_key(KEY_VOLUMEDOWN)
-
-    async def async_set_volume_level(self, volume: float) -> None:
-        await self.coordinator.client.async_set_volume(int(round(volume * 100)))
+        await self.coordinator.async_send_key(KEY_VOLUMEDOWN)
+        self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool) -> None:
         tv = self.coordinator.client.state
         if tv.muted != mute:
             await self.coordinator.client.async_toggle_mute()
+            self.async_write_ha_state()
 
     async def async_media_play(self) -> None:
         await self.coordinator.client.async_send_key(KEY_PLAY)

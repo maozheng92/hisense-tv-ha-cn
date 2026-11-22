@@ -27,6 +27,7 @@ from .const import (
     DEFAULT_SOURCE_KEY_DELAY,
     MQTT_CONNACK_WAIT,
     MQTT_CONNECT_TIMEOUT,
+    MQTT_DISCONNECT_GRACE,
     MQTT_KEEPALIVE,
     RC_TCP_FAILED,
     RC_TLS_FAILED,
@@ -35,6 +36,12 @@ from .const import (
     SOURCE_MENU_SETTLE,
     SOURCE_OPEN_RETRIES,
     SOURCE_OPEN_RETRY_DELAY,
+    VOLUME_CEC_GAP,
+    VOLUME_KEY_IDLE_WARMUP,
+    VOLUME_KEY_PAUSE,
+    VOLUME_TYPE_ARC,
+    VOLUME_TYPE_MUTE,
+    VOLUME_UNKNOWN_FLOOR_STEPS,
 )
 from .credentials import (
     MqttCredentials,
@@ -43,7 +50,7 @@ from .credentials import (
     normalize_uuid,
     with_access_token,
 )
-from .keys import KEY_POWER, KEY_SOURCE, normalize_key
+from .keys import KEY_POWER, KEY_SOURCE, KEY_VOLUMEDOWN, KEY_VOLUMEUP, normalize_key
 from .local_http import (
     capture_screen,
     is_android_package,
@@ -154,6 +161,8 @@ class TvState:
     available: bool = False
     power_on: bool = False
     volume: int | None = None
+    # VIDAA volumechange volume_type: 0=TV speakers, 1=HDMI ARC/eARC, 2=mute/BT.
+    volume_type: int | None = None
     muted: bool = False
     statetype: str | None = None
     source_id: str | None = None
@@ -219,9 +228,15 @@ class HisenseTvClient:
         self._connect_rc: int = -1
         self._lock = threading.Lock()
         self.ble: Any = None
-        # After cold power-on / MQTT reconnect, wait for the LAN remoter before
-        # the first KEY_SOURCE in a custom-source macro.
+        # After cold power-on / MQTT reconnect, wait for LAN remoter (7778/7779)
+        # before KEY_SOURCE macros and volume KEY_VOLUME*.
         self._control_warmup = True
+        self._volume_lock = threading.Lock()
+        self._last_remoter_ok_at = 0.0
+        self._last_volume_deliver_at = 0.0
+        self._mqtt_epoch = 0
+        self._offline_timer: threading.Timer | None = None
+        self._offline_lock = threading.Lock()
 
     @property
     def creds(self) -> MqttCredentials | None:
@@ -261,10 +276,22 @@ class HisenseTvClient:
             return
         if not isinstance(payload, dict):
             return
-        # sehaas volumechange: type 0 is the level, type 2 is mute.
-        if payload.get("volume_type") in (2, "2"):
-            self.state.muted = str(payload.get("volume_value")) in {"1", "true", "True"}
-            return
+        raw_type = payload.get("volume_type")
+        volume_type: int | None
+        try:
+            volume_type = int(raw_type) if raw_type is not None else None
+        except (TypeError, ValueError):
+            volume_type = None
+        # sehaas: type 2 + 0/1 is mute. CaptainSolidus: type 0/1/2 = TV/ARC/BT level.
+        # Prefer mute when type 2 and value is only a boolean-ish flag.
+        if volume_type == VOLUME_TYPE_MUTE:
+            value = payload.get("volume_value")
+            if value is not None and str(value) in {"0", "1", "true", "True", "false", "False"}:
+                self.state.volume_type = VOLUME_TYPE_MUTE
+                self.state.muted = str(value) in {"1", "true", "True"}
+                return
+        if volume_type is not None:
+            self.state.volume_type = volume_type
         for key in ("volume_value", "volume", "vol"):
             if key in payload and payload[key] is not None:
                 try:
@@ -282,18 +309,33 @@ class HisenseTvClient:
                 self.state.statetype = data
                 self.state.power_on = True
             return
-        self.state.statetype = data.get("statetype") or data.get("state")
+        raw_type = data.get("statetype")
+        raw_state = data.get("state")
+        label: str | None = None
+        if raw_type is not None and str(raw_type).strip() != "":
+            label = str(raw_type)
+        elif isinstance(raw_state, str) and raw_state.strip():
+            # Numeric ``state`` flags (0/1) are not a power statetype.
+            label = raw_state
         name = data.get("sourcename") or data.get("source_name") or data.get("displayname")
         sid = data.get("sourceid") or data.get("source_id")
         if name:
             self.state.source_name = str(name)
         if sid is not None:
             self.state.source_id = str(sid)
-        kind = str(self.state.statetype or "").lower()
-        # sehaas treats fake_sleep_0 as off while the broker is still up.
-        self.state.power_on = kind not in {"fake_sleep_0", "fake_sleep", "tvsleep", "sleep", "off"}
-        if kind == "livetv":
-            self.state.source_name = data.get("channel_name") or name or "TV"
+        if label is not None:
+            self.state.statetype = label
+            kind = label.lower()
+            # sehaas treats fake_sleep_0 as off while the broker is still up.
+            self.state.power_on = kind not in {
+                "fake_sleep_0",
+                "fake_sleep",
+                "tvsleep",
+                "sleep",
+                "off",
+            }
+            if kind == "livetv":
+                self.state.source_name = data.get("channel_name") or name or "TV"
         self._apply_volume(data)
         self._maybe_learn_tv_mac(data)
 
@@ -385,6 +427,8 @@ class HisenseTvClient:
             self._set_loop_event(self._connected_event)
             return
         _LOGGER.info("Connected to %s:%s as %s", self.host, self.port, self._creds.client_id if self._creds else "")
+        self._mqtt_epoch += 1
+        self._cancel_offline_timer()
         self.state.available = True
         self.state.power_on = True
         self.state.last_error = None
@@ -392,6 +436,57 @@ class HisenseTvClient:
             for topic in topics.subscription_topics(self._creds, self.tv_mac):
                 client.subscribe(topic, qos=0)
         self._set_loop_event(self._connected_event)
+        self._notify()
+
+    def _cancel_offline_timer(self) -> None:
+        with self._offline_lock:
+            timer = self._offline_timer
+            self._offline_timer = None
+        if timer is not None:
+            timer.cancel()
+
+    def _schedule_offline(self, epoch: int) -> None:
+        self._cancel_offline_timer()
+        timer = threading.Timer(
+            MQTT_DISCONNECT_GRACE, self._apply_mqtt_offline, args=(epoch,)
+        )
+        timer.daemon = True
+        with self._offline_lock:
+            self._offline_timer = timer
+        timer.start()
+
+    def _note_remoter_ok(self) -> None:
+        """LAN 7778/7779 answered — the TV is on even if MQTT just blipped."""
+        self._last_remoter_ok_at = time.monotonic()
+        self._control_warmup = False
+        changed = False
+        if not self.state.available:
+            self.state.available = True
+            changed = True
+        if not self.state.power_on:
+            self.state.power_on = True
+            changed = True
+        pending = False
+        with self._offline_lock:
+            pending = self._offline_timer is not None
+        if pending:
+            self._schedule_offline(self._mqtt_epoch)
+        if changed:
+            self._notify()
+
+    def _apply_mqtt_offline(self, epoch: int) -> None:
+        """Mark the TV off only if this disconnect was not followed by CONNECT."""
+        if epoch != self._mqtt_epoch or self._stop.is_set():
+            return
+        ble_up = self.ble is not None and getattr(self.ble, "connected", False)
+        if ble_up:
+            self.state.available = True
+            self._notify()
+            return
+        _LOGGER.info("MQTT still down after %.1fs; marking TV off", MQTT_DISCONNECT_GRACE)
+        self.state.available = False
+        self.state.power_on = False
+        self._control_warmup = True
         self._notify()
 
     def _on_disconnect(self, client: mqtt.Client, userdata: Any, *args: Any, **kwargs: Any) -> None:
@@ -406,10 +501,9 @@ class HisenseTvClient:
             self.state.available = True
             self._notify()
             return
-        self.state.available = False
-        self.state.power_on = False
-        self._control_warmup = True
-        self._notify()
+        # Volume +/- hits LAN remoter 7778; that can drop MQTT 36669 briefly.
+        # Flipping power_on here makes media_player go on→off→on.
+        self._schedule_offline(self._mqtt_epoch)
 
     def _on_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
         try:
@@ -602,6 +696,8 @@ class HisenseTvClient:
 
     def disconnect_blocking(self) -> None:
         self._stop.set()
+        self._mqtt_epoch += 1
+        self._cancel_offline_timer()
         client = self._client
         self._client = None
         if client is None:
@@ -664,8 +760,12 @@ class HisenseTvClient:
         if name == KEY_SOURCE:
             self.open_source()
             return
+        if name in {KEY_VOLUMEUP, KEY_VOLUMEDOWN}:
+            self._send_volume_step(name)
+            return
         status = send_local_key(self.host, name)
         if status is not None and 200 <= status < 300:
+            self._note_remoter_ok()
             return
         _LOGGER.info("HTTP remote did not take %s (status %s); trying MQTT", name, status)
         self._publish_action("remote_service", "sendkey", key, as_key=True)
@@ -807,11 +907,162 @@ class HisenseTvClient:
         for action in ("smartimage", "pushSmartImage", "functionSmartImage"):
             self._publish_action("ui_service", action, "")
 
-    def set_volume(self, volume: int) -> None:
-        volume = max(0, min(100, int(volume)))
-        # sehaas publishes the bare level, not a JSON object.
-        self._publish_action("platform_service", "changevolume", volume)
-        self.state.volume = volume
+    def _note_volume_delta(self, delta: int) -> None:
+        """Optimistic local level after a successful ±1 step."""
+        if self.state.volume is None:
+            return
+        self.state.volume = max(0, min(100, int(self.state.volume) + int(delta)))
+        self._notify()
+
+    def _is_arc_audio(self) -> bool:
+        """True when HDMI ARC/eARC is the active audio output (CEC volume)."""
+        return self.state.volume_type == VOLUME_TYPE_ARC
+
+    def _publish_changevolume_tip(self, tip: str) -> bool:
+        """Publish changevolume on the session id and the ``$normal`` twin.
+
+        Community ARC notes used ``{mac}$normal``; this TV session is
+        ``$vidaa_common`` (see HA logs). Try both when the prefix differs.
+        """
+        sent = 0
+        try:
+            self._publish_action("platform_service", "changevolume", tip)
+            sent += 1
+        except RuntimeError:
+            _LOGGER.debug("changevolume on session id failed", exc_info=True)
+        creds = self._creds
+        if creds is not None and "$" in (creds.client_id or ""):
+            prefix, _, flavor = creds.client_id.partition("$")
+            alt = "normal" if flavor != "normal" else "vidaa_common"
+            alt_id = f"{prefix}${alt}"
+            if alt_id != creds.client_id:
+                try:
+                    self._publish(
+                        f"/remoteapp/tv/platform_service/{alt_id}/actions/changevolume",
+                        tip,
+                    )
+                    sent += 1
+                except RuntimeError:
+                    _LOGGER.debug("changevolume on %s failed", alt_id, exc_info=True)
+        return sent > 0
+
+    def _send_volume_step(
+        self,
+        key: str,
+        *,
+        pause: Callable[[float], None] = time.sleep,
+    ) -> bool:
+        """One media_player +/- step: a single LAN KEY_VOLUME, paced for CEC.
+
+        User: MQTT cannot control volume — use LAN. Dual MQTT+LAN (15:51)
+        flooded CEC. 1.22.9 retried LAN when volumechange was silent; both
+        keys landed and volume jumped two steps — that retry is gone.
+
+        1. Wait ``VOLUME_CEC_GAP`` since the last KEY (0.9s).
+        2. Deliver **one** ``KEY_VOLUME*`` via LAN remoter (7778/7779).
+        3. Never MQTT ``sendkey`` / ``changevolume`` on this path.
+
+        No ``VOLUME_SET`` slider.
+        """
+        name = normalize_key(key)
+        if name not in {KEY_VOLUMEUP, KEY_VOLUMEDOWN}:
+            raise ValueError(f"not a volume key: {key}")
+        delta = 1 if name == KEY_VOLUMEUP else -1
+        gap = max(0.0, float(VOLUME_CEC_GAP))
+        with self._volume_lock:
+            since = time.monotonic() - self._last_volume_deliver_at
+            if gap and since < gap:
+                pause(gap - since)
+                _LOGGER.info("volume step CEC pace %.2fs before LAN", gap)
+
+            idle = time.monotonic() - self._last_remoter_ok_at
+            if self._control_warmup or idle >= VOLUME_KEY_IDLE_WARMUP:
+                self._wait_for_remoter(pause=pause)
+            status = send_local_key(self.host, name)
+            delivered = status is not None and 200 <= status < 300
+            if delivered:
+                self._note_remoter_ok()
+                _LOGGER.info("volume step LAN %s (status %s)", name, status)
+            else:
+                _LOGGER.info("volume step LAN %s missed (status %s)", name, status)
+
+            self._last_volume_deliver_at = time.monotonic()
+            if delivered:
+                self._note_volume_delta(delta)
+                return True
+            return False
+
+    def _press_volume_key(
+        self,
+        key: str,
+        *,
+        count: int,
+        pause: Callable[[float], None] = time.sleep,
+        step_pause: float = VOLUME_KEY_PAUSE,
+    ) -> bool:
+        """Repeat volume steps (helper for absolute set_volume)."""
+        if count <= 0:
+            return True
+        wait = max(0.0, float(step_pause))
+        for index in range(count):
+            if not self._send_volume_step(key, pause=pause):
+                return False
+            if index + 1 < count and wait:
+                pause(wait)
+        return True
+
+    def _set_volume_by_keys(
+        self,
+        target: int,
+        *,
+        pause: Callable[[float], None] = time.sleep,
+        step_pause: float = VOLUME_KEY_PAUSE,
+    ) -> bool:
+        """Move toward an absolute level via repeated changevolume ±1 steps."""
+        current = self.state.volume
+        if current is None:
+            # Unknown: one MQTT tip cannot seek; floor then climb on TV path.
+            if self._is_arc_audio():
+                return False
+            if not self._press_volume_key(
+                KEY_VOLUMEDOWN,
+                count=VOLUME_UNKNOWN_FLOOR_STEPS,
+                pause=pause,
+                step_pause=step_pause,
+            ):
+                return False
+            current = 0
+        delta = int(target) - int(current)
+        if delta == 0:
+            return True
+        key = KEY_VOLUMEUP if delta > 0 else KEY_VOLUMEDOWN
+        return self._press_volume_key(
+            key,
+            count=abs(delta),
+            pause=pause,
+            step_pause=step_pause,
+        )
+
+    def set_volume(
+        self,
+        volume: int,
+        *,
+        pause: Callable[[float], None] = time.sleep,
+    ) -> None:
+        """Best-effort absolute volume for non-UI callers (no HA slider)."""
+        target = max(0, min(100, int(volume)))
+        used = self._set_volume_by_keys(target, pause=pause)
+        if not used:
+            try:
+                self._publish_action("platform_service", "changevolume", str(target))
+            except RuntimeError:
+                _LOGGER.debug("absolute changevolume failed", exc_info=True)
+        self.state.volume = target
+        self._notify()
+        try:
+            self._publish_action("platform_service", "getvolume", "")
+        except RuntimeError:
+            _LOGGER.debug("getvolume after set_volume failed", exc_info=True)
 
     def change_source(self, source_id: str, source_name: str | None = None) -> None:
         payload: dict[str, str] = {"sourceid": str(source_id)}

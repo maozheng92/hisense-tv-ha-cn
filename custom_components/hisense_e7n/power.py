@@ -20,11 +20,20 @@ from .const import (
     CONF_POWER_ON_DEVICE,
     CONF_POWER_ON_MODE,
     CONF_POWER_ON_REMOTE,
+    CONF_VOLUME_DOWN_BUTTON,
+    CONF_VOLUME_UP_BUTTON,
     DEFAULT_POWER_ON_COMMAND,
+    FORM_VOLUME_DOWN_BUTTON,
+    FORM_VOLUME_UP_BUTTON,
     POWER_ON_MODE_BUTTON,
     POWER_ON_MODE_REMOTE,
     POWER_ON_MODE_WOL,
 )
+
+VOLUME_FORM_TO_CONF = {
+    FORM_VOLUME_UP_BUTTON: CONF_VOLUME_UP_BUTTON,
+    FORM_VOLUME_DOWN_BUTTON: CONF_VOLUME_DOWN_BUTTON,
+}
 
 PRESS_DOMAINS = frozenset({"button", "input_button"})
 TURN_ON_DOMAINS = frozenset({"switch", "script", "scene", "input_boolean", "automation"})
@@ -114,6 +123,18 @@ def power_on_call(
     return None
 
 
+def entity_press_call(entity_id: str | None) -> PowerOnCall | None:
+    """Press a button / switch / script. Used for optional volume +/- entities."""
+    entity = normalize_power_on_entity(entity_id)
+    if entity is None:
+        return None
+    try:
+        domain, service = power_on_service(entity)
+    except ValueError:
+        return None
+    return PowerOnCall(domain, service, {"entity_id": entity})
+
+
 def power_on_form_errors(data: dict[str, Any]) -> dict[str, str]:
     """Validate the per-TV power-on fields. Empty button mode is allowed."""
     mode = data.get(CONF_POWER_ON_MODE) or POWER_ON_MODE_BUTTON
@@ -143,4 +164,55 @@ def clean_power_on_fields(data: dict[str, Any]) -> dict[str, Any]:
         cleaned[CONF_POWER_ON_REMOTE],
         data.get("mac"),
     )
+    return clean_volume_button_fields(cleaned)
+
+
+def apply_volume_form_keys(data: dict[str, Any]) -> dict[str, Any]:
+    """Copy 音量加/减按钮 form values onto the stored config keys."""
+    cleaned = dict(data)
+    for form_key, conf_key in VOLUME_FORM_TO_CONF.items():
+        if form_key in cleaned:
+            cleaned[conf_key] = cleaned.pop(form_key)
     return cleaned
+
+
+def volume_form_suggested(data: dict[str, Any]) -> dict[str, Any]:
+    """Expose stored volume entities under the Chinese form keys."""
+    suggested = dict(data)
+    for form_key, conf_key in VOLUME_FORM_TO_CONF.items():
+        if conf_key in suggested:
+            if form_key not in suggested:
+                suggested[form_key] = suggested[conf_key]
+            suggested.pop(conf_key)
+    return suggested
+
+
+def volume_form_error_keys(errors: dict[str, str]) -> dict[str, str]:
+    """Point flow errors at the Chinese schema keys HA actually renders."""
+    conf_to_form = {conf: form for form, conf in VOLUME_FORM_TO_CONF.items()}
+    return {conf_to_form.get(key, key): value for key, value in errors.items()}
+
+
+def clean_volume_button_fields(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize optional volume +/- button entities."""
+    cleaned = apply_volume_form_keys(data)
+    cleaned[CONF_VOLUME_UP_BUTTON] = (
+        normalize_power_on_entity(cleaned.get(CONF_VOLUME_UP_BUTTON)) or ""
+    )
+    cleaned[CONF_VOLUME_DOWN_BUTTON] = (
+        normalize_power_on_entity(cleaned.get(CONF_VOLUME_DOWN_BUTTON)) or ""
+    )
+    return cleaned
+
+
+def volume_button_form_errors(data: dict[str, Any]) -> dict[str, str]:
+    """Reject volume entities that are not a button, switch, or script."""
+    mapped = apply_volume_form_keys(dict(data))
+    errors: dict[str, str] = {}
+    for key in (CONF_VOLUME_UP_BUTTON, CONF_VOLUME_DOWN_BUTTON):
+        raw = mapped.get(key)
+        if not str(raw or "").strip():
+            continue
+        if entity_press_call(str(raw)) is None:
+            errors[key] = "volume_button_invalid"
+    return volume_form_error_keys(errors)
