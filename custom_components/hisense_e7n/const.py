@@ -109,3 +109,6 @@ REMOTE_CLIENT_ID = "HomeAssistant"
 
 DATA_CLIENT = "client"
 DATA_COORDINATOR = "coordinator"
+# Platform setup order matches TCL: media_player, remote, then Hisense buttons.
+PLATFORMS = ("media_player", "remote", "button")
+ATTR_HIDDEN = "hidden"

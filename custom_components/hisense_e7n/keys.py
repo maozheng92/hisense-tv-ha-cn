@@ -78,6 +78,9 @@ ALIASES: dict[str, str] = {
     "settings": KEY_CONTROL_CENTER,
     "controlcenter": KEY_CONTROL_CENTER,
     "screenshot": "screenshot",
+    "capture": "screenshot",
+    "capturescreen": "screenshot",
+    "截屏": "screenshot",
     "smart_image": "smart_image",
     "ai": "smart_image",
 }

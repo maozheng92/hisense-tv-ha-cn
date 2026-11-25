@@ -100,6 +100,28 @@ def test_move_custom_source_reorders_list(proto_custom_sources) -> None:
     assert [item["name"] for item in clamped] == ["AV", "HDMI1", "HDMI2"]
 
 
+def test_hidden_sources_stay_callable_but_leave_source_list(proto_custom_sources) -> None:
+    sources = proto_custom_sources.normalize_custom_sources(
+        [
+            {"name": "HDMI1", "keys": ["KEY_SOURCE", "KEY_OK"]},
+            {
+                "name": "HDMI2",
+                "keys": ["KEY_SOURCE", "KEY_RIGHT", "KEY_OK"],
+                "hidden": True,
+                "interval": 0.2,
+            },
+        ]
+    )
+    assert proto_custom_sources.visible_source_names(sources) == ["HDMI1"]
+    copied = proto_custom_sources.copy_sources(sources)
+    assert copied[1]["hidden"] is True
+    assert copied[1]["interval"] == 0.2
+    found = proto_custom_sources.find_custom_source(sources, "hdmi2")
+    assert found is not None and found["name"] == "HDMI2"
+    assert proto_custom_sources.source_key_delay(found, 0.1) == 0.2
+    assert proto_custom_sources.source_key_delay(sources[0], 0.1) == 0.1
+
+
 def test_default_key_delay_is_snappier(proto_const) -> None:
     assert proto_const.DEFAULT_SOURCE_KEY_DELAY == 0.1
     assert 0.5 in proto_const.LEGACY_SOURCE_KEY_DELAYS

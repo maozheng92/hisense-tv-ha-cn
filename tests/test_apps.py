@@ -52,6 +52,30 @@ def test_local_package_keeps_size_and_title() -> None:
     assert apps.format_app_title(parsed[0]) == "健身镜 (51.45M)"
 
 
+def test_resolve_app_matches_package_name_and_substring() -> None:
+    apps = load_proto("apps")
+    parsed = apps.normalize_apps(
+        [
+            {
+                "name": "云视听极光",
+                "packageName": "com.ktcp.video",
+                "url": "tenvideo2",
+            },
+            {
+                "name": "健身镜",
+                "packageName": "com.hisense.fitness",
+                "isLocalApp": 1,
+            },
+        ]
+    )
+    assert apps.resolve_app(parsed, "com.ktcp.video")["name"] == "云视听极光"
+    assert apps.resolve_app(parsed, "云视听极光")["package"] == "com.ktcp.video"
+    assert apps.resolve_app(parsed, "tenvideo2")["name"] == "云视听极光"
+    assert apps.resolve_app(parsed, "fitness")["package"] == "com.hisense.fitness"
+    assert apps.resolve_app(parsed, "com") is None
+    assert apps.app_media_id(parsed[0]) == "com.ktcp.video"
+
+
 def test_name_list_and_client_apply(proto_client) -> None:
     apps = load_proto("apps")
     assert [item["name"] for item in apps.normalize_apps({"mqttAppNameList": ["聚好看", "聚好看", ""]})] == [

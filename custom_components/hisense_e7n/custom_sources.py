@@ -207,7 +207,12 @@ def normalize_custom_sources(value: Any) -> list[dict[str, Any]]:
         if name in seen:
             raise ValueError(f"duplicate custom source name: {name}")
         seen.add(name)
-        sources.append({"name": name, "keys": keys})
+        entry: dict[str, Any] = {"name": name, "keys": keys}
+        if item.get("hidden"):
+            entry["hidden"] = True
+        if item.get("interval") is not None:
+            entry["interval"] = item.get("interval")
+        sources.append(entry)
     return sources
 
 
@@ -223,8 +228,56 @@ def custom_source_slug(name: str) -> str:
 def find_custom_source(
     sources: list[dict[str, Any]], name: str
 ) -> dict[str, Any] | None:
-    needle = name.strip()
+    needle = (name or "").strip()
+    if not needle:
+        return None
     for item in sources:
         if item.get("name") == needle:
             return item
+    lowered = needle.casefold()
+    for item in sources:
+        if str(item.get("name") or "").casefold() == lowered:
+            return item
     return None
+
+
+def copy_sources(sources: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Deep-copy stored sources (TCL ``copy_sources`` layout)."""
+    copied: list[dict[str, Any]] = []
+    for item in sources or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        keys = item.get("keys") or []
+        if not name or not isinstance(keys, list):
+            continue
+        entry: dict[str, Any] = {"name": name, "keys": list(keys)}
+        if item.get("hidden"):
+            entry["hidden"] = True
+        interval = item.get("interval")
+        if interval is not None:
+            entry["interval"] = interval
+        copied.append(entry)
+    return copied
+
+
+def visible_source_names(sources: list[dict[str, Any]] | None) -> list[str]:
+    """Names shown on media_player.source_list (hidden macros stay callable)."""
+    names: list[str] = []
+    for item in sources or []:
+        name = str(item.get("name") or "").strip()
+        if name and not item.get("hidden"):
+            names.append(name)
+    return names
+
+
+def source_key_delay(source: dict[str, Any], default: float) -> float:
+    """Per-source interval when set, else the integration default."""
+    raw = source.get("interval")
+    if raw is None:
+        return default
+    try:
+        wait = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(5.0, wait))

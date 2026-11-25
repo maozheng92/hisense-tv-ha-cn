@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components import persistent_notification
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -13,12 +12,10 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .button_visibility import should_hide_button_registry_entry
-from .const import DATA_COORDINATOR, DOMAIN
-from .coordinator import HisenseTvCoordinator
 from .custom_sources import custom_source_slug
-from .entity import HisenseTvEntity
+from .entity import HisenseTvEntity, tv_errors
+from .hub import HisenseTvHub, hub_from_entry
 from .keys import AIJIA_REMOTER_BUTTONS, KEY_POWER, RemoterButton
-from .screenshot_store import async_save_screenshot
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,13 +51,13 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: HisenseTvCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+    hub = hub_from_entry(hass, entry)
     entities: list[ButtonEntity] = [
-        HisenseTvRemoterButton(coordinator, entry, spec) for spec in AIJIA_REMOTER_BUTTONS
+        HisenseTvRemoterButton(hub, entry, spec) for spec in AIJIA_REMOTER_BUTTONS
     ]
     entities.extend(
-        HisenseTvCustomSourceButton(coordinator, entry, source)
-        for source in coordinator.custom_sources
+        HisenseTvCustomSourceButton(hub, entry, source)
+        for source in hub.custom_sources
     )
     async_add_entities(entities)
     # New entities honour visible_default=False; migrate older visible rows.
@@ -78,11 +75,11 @@ class HisenseTvRemoterButton(HisenseTvEntity, ButtonEntity):
 
     def __init__(
         self,
-        coordinator: HisenseTvCoordinator,
+        hub: HisenseTvHub,
         entry: ConfigEntry,
         spec: RemoterButton,
     ) -> None:
-        super().__init__(coordinator, entry)
+        super().__init__(hub, entry)
         self._spec = spec
         self._attr_unique_id = f"{entry.entry_id}_{spec.slug}"
         self._attr_translation_key = spec.translation_key
@@ -92,49 +89,32 @@ class HisenseTvRemoterButton(HisenseTvEntity, ButtonEntity):
     def available(self) -> bool:
         if self._spec.kind == "power":
             return super().available
-        return self.coordinator.client.state.available
+        return self.hub.client.state.available
 
     async def async_press(self) -> None:
-        client = self.coordinator.client
+        client = self.hub.client
         kind = self._spec.kind
         if kind == "power":
             if not client.state.available:
-                await self.coordinator.async_turn_on()
+                await self.hub.async_turn_on()
             else:
-                await client.async_send_key(KEY_POWER)
+                with tv_errors():
+                    await client.async_send_key(KEY_POWER)
             return
         if kind == "screenshot":
-            image = await client.async_capture_screenshot()
-            title = (self._entry.title or "海信").strip() or "海信"
-            filename = f"{title} 截屏.jpg".replace("/", " ").replace("\\", " ")
-            media_id = await async_save_screenshot(
-                self.hass,
-                self._entry.entry_id,
-                image,
-                filename,
-            )
-            client.remember_screenshot(media_id)
-            note = client.state.screenshot_note
-            message = (
-                f"截屏已保存到媒体浏览器的 Image upload，文件名是「{filename}」。"
-                f"直接打开 /api/image/serve/{media_id}/original 。"
-            )
-            if note:
-                message = f"{note}\n{message}"
-            persistent_notification.async_create(
-                self.hass,
-                message,
-                title="海信截屏",
-                notification_id=f"{DOMAIN}_screenshot_{self._entry.entry_id}",
-            )
+            with tv_errors():
+                await self.hub.async_capture_and_store_screenshot()
             return
         if kind == "source":
-            await client.async_open_source()
+            with tv_errors():
+                await client.async_open_source()
             return
         if kind == "smart_image":
-            await client.async_push_smart_image()
+            with tv_errors():
+                await client.async_push_smart_image()
             return
-        await self.coordinator.async_send_key(self._spec.payload or self._spec.slug)
+        with tv_errors():
+            await self.hub.async_send_key(self._spec.payload or self._spec.slug)
 
 
 class HisenseTvCustomSourceButton(HisenseTvEntity, ButtonEntity):
@@ -145,23 +125,20 @@ class HisenseTvCustomSourceButton(HisenseTvEntity, ButtonEntity):
 
     def __init__(
         self,
-        coordinator: HisenseTvCoordinator,
+        hub: HisenseTvHub,
         entry: ConfigEntry,
         source: dict[str, Any],
     ) -> None:
-        super().__init__(coordinator, entry)
+        super().__init__(hub, entry)
         self._source_name = str(source["name"])
-        self._keys = list(source["keys"])
         slug = custom_source_slug(self._source_name)
         self._attr_unique_id = f"{entry.entry_id}_custom_source_{slug}"
         self._attr_name = self._source_name
 
     @property
     def available(self) -> bool:
-        return self.coordinator.client.state.available
+        return self.hub.client.state.available
 
     async def async_press(self) -> None:
-        await self.coordinator.client.async_run_key_sequence(
-            self._keys,
-            delay=self.coordinator.source_key_delay,
-        )
+        with tv_errors():
+            await self.hub.async_press_source_buttons(self._source_name)

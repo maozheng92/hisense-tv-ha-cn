@@ -1,4 +1,8 @@
-"""TV media player for Hisense E7N Pro."""
+"""TV media player for Hisense E7N Pro.
+
+Layout follows TCL: HDMI/custom macros on source_list, installed apps in
+Media Browser (browse_media / play_media). VOLUME_SET is never advertised.
+"""
 
 from __future__ import annotations
 
@@ -7,22 +11,34 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.components.media_player import (
+    BrowseMedia,
+    MediaClass,
     MediaPlayerDeviceClass,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
+    MediaType,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .apps import format_app_title
-from .const import DATA_COORDINATOR, DOMAIN
-from .coordinator import HisenseTvCoordinator
-from .custom_sources import find_custom_source
-from .entity import HisenseTvEntity
+try:
+    from homeassistant.components.media_player.errors import BrowseError
+except ImportError:  # pragma: no cover
+    BrowseError = HomeAssistantError  # type: ignore[misc,assignment]
+
+try:
+    from homeassistant.exceptions import ServiceValidationError
+except ImportError:  # pragma: no cover
+    ServiceValidationError = HomeAssistantError  # type: ignore[misc,assignment]
+
+from .apps import app_media_id, format_app_title, resolve_app
+from .entity import HisenseTvEntity, tv_errors
+from .hub import HisenseTvHub, hub_from_entry
 from .keys import (
     KEY_CHANNELDOWN,
     KEY_CHANNELUP,
@@ -35,17 +51,18 @@ from .keys import (
 
 # No VOLUME_SET: +/- uses MQTT sendkey KEY_VOLUME* + LAN remoter (eARC).
 # VOLUME_STEP only — never a HA slider.
-SUPPORT = (
+_BASE_SUPPORT = (
     MediaPlayerEntityFeature.TURN_ON
     | MediaPlayerEntityFeature.TURN_OFF
     | MediaPlayerEntityFeature.VOLUME_MUTE
     | MediaPlayerEntityFeature.VOLUME_STEP
-    | MediaPlayerEntityFeature.SELECT_SOURCE
     | MediaPlayerEntityFeature.PLAY
     | MediaPlayerEntityFeature.PAUSE
     | MediaPlayerEntityFeature.STOP
     | MediaPlayerEntityFeature.NEXT_TRACK
     | MediaPlayerEntityFeature.PREVIOUS_TRACK
+    | MediaPlayerEntityFeature.PLAY_MEDIA
+    | MediaPlayerEntityFeature.BROWSE_MEDIA
 )
 
 
@@ -54,8 +71,8 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: HisenseTvCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    async_add_entities([HisenseTvMediaPlayer(coordinator, entry)])
+    hub = hub_from_entry(hass, entry)
+    async_add_entities([HisenseTvMediaPlayer(hub, entry)])
     platform = entity_platform.async_get_current_platform()
     platform.async_register_entity_service(
         "launch_app",
@@ -73,16 +90,22 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
     _attr_device_class = MediaPlayerDeviceClass.TV
     _attr_name = None
     _attr_icon = "mdi:television"
-    _attr_supported_features = SUPPORT
     _attr_translation_key = "tv"
 
-    def __init__(self, coordinator: HisenseTvCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry)
+    def __init__(self, hub: HisenseTvHub, entry: ConfigEntry) -> None:
+        super().__init__(hub, entry)
         self._attr_unique_id = f"{entry.entry_id}_media_player"
 
     @property
+    def supported_features(self) -> MediaPlayerEntityFeature:
+        features = _BASE_SUPPORT
+        if self.source_list:
+            features |= MediaPlayerEntityFeature.SELECT_SOURCE
+        return features
+
+    @property
     def state(self) -> MediaPlayerState:
-        tv = self.coordinator.data or self.coordinator.client.state
+        tv = self.hub.tv
         if not tv.available or not tv.power_on:
             return MediaPlayerState.OFF
         kind = (tv.statetype or "").lower()
@@ -94,14 +117,14 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
 
     @property
     def volume_level(self) -> float | None:
-        volume = (self.coordinator.data or self.coordinator.client.state).volume
+        volume = self.hub.tv.volume
         if volume is None:
             return None
         return max(0.0, min(1.0, volume / 100.0))
 
     @property
     def is_volume_muted(self) -> bool:
-        return (self.coordinator.data or self.coordinator.client.state).muted
+        return self.hub.tv.muted
 
     @property
     def media_title(self) -> str | None:
@@ -109,107 +132,133 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
 
     @property
     def source(self) -> str | None:
-        tv = self.coordinator.data or self.coordinator.client.state
-        return tv.source_name
+        names = self.source_list or []
+        selected = self.hub.selected_source
+        if selected in names:
+            return selected
+        return self.hub.tv.source_name
 
     @property
     def source_list(self) -> list[str] | None:
-        tv = self.coordinator.data or self.coordinator.client.state
-        names = [
-            str(item["name"])
-            for item in self.coordinator.custom_sources
-            if item.get("name")
-        ]
-        for item in tv.sources:
-            name = item.get("name")
-            if name and name not in names:
-                names.append(str(name))
-        for app in tv.apps:
-            name = app.get("name") or app.get("appName")
-            if name and name not in names:
-                names.append(str(name))
+        names = self.hub.visible_source_names
         return names or None
 
     async def async_turn_on(self) -> None:
-        await self.coordinator.async_turn_on()
+        await self.hub.async_turn_on()
 
     async def async_turn_off(self) -> None:
-        await self.coordinator.client.async_turn_off()
+        with tv_errors():
+            await self.hub.client.async_turn_off()
 
     async def async_volume_up(self) -> None:
-        await self.coordinator.async_send_key(KEY_VOLUMEUP)
+        await self.hub.async_send_key(KEY_VOLUMEUP)
         self.async_write_ha_state()
 
     async def async_volume_down(self) -> None:
-        await self.coordinator.async_send_key(KEY_VOLUMEDOWN)
+        await self.hub.async_send_key(KEY_VOLUMEDOWN)
         self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool) -> None:
-        tv = self.coordinator.client.state
+        tv = self.hub.client.state
         if tv.muted != mute:
-            await self.coordinator.client.async_toggle_mute()
+            with tv_errors():
+                await self.hub.client.async_toggle_mute()
             self.async_write_ha_state()
 
     async def async_media_play(self) -> None:
-        await self.coordinator.client.async_send_key(KEY_PLAY)
+        with tv_errors():
+            await self.hub.client.async_send_key(KEY_PLAY)
 
     async def async_media_pause(self) -> None:
-        await self.coordinator.client.async_send_key(KEY_PAUSE)
+        with tv_errors():
+            await self.hub.client.async_send_key(KEY_PAUSE)
 
     async def async_media_stop(self) -> None:
-        await self.coordinator.client.async_send_key(KEY_STOP)
+        with tv_errors():
+            await self.hub.client.async_send_key(KEY_STOP)
 
     async def async_media_next_track(self) -> None:
-        await self.coordinator.client.async_send_key(KEY_CHANNELUP)
+        with tv_errors():
+            await self.hub.client.async_send_key(KEY_CHANNELUP)
 
     async def async_media_previous_track(self) -> None:
-        await self.coordinator.client.async_send_key(KEY_CHANNELDOWN)
+        with tv_errors():
+            await self.hub.client.async_send_key(KEY_CHANNELDOWN)
 
     async def async_select_source(self, source: str) -> None:
-        custom = find_custom_source(self.coordinator.custom_sources, source)
-        if custom is not None:
-            await self.coordinator.client.async_run_key_sequence(
-                list(custom["keys"]),
-                delay=self.coordinator.source_key_delay,
-            )
-            return
-        tv = self.coordinator.client.state
-        for item in tv.sources:
-            if item.get("name") == source:
-                await self.coordinator.client.async_change_source(item["id"], source)
-                return
-        for app in tv.apps:
-            name = app.get("name")
-            title = format_app_title(app)
-            if name == source or title == source:
-                url = app.get("url") or app.get("app_id")
-                await self.coordinator.client.async_launch_app(
-                    str(name),
-                    str(url) if url else None,
-                    int(app.get("url_type") or 37),
-                    int(app.get("store_type") or 0),
-                    str(app["package"]) if app.get("package") else None,
-                )
-                return
-        await self.coordinator.client.async_launch_app(source)
+        with tv_errors():
+            await self.hub.async_select_source(source)
 
     async def async_launch_app_service(self, name: str, url: str | None = None) -> None:
-        await self.coordinator.client.async_launch_app(name, url)
+        with tv_errors():
+            await self.hub.async_launch_app(name, url)
+
+    async def async_play_media(
+        self, media_type: str, media_id: str, **kwargs: Any
+    ) -> None:
+        if media_type not in (MediaType.APP, "app", MediaType.APPS, "apps"):
+            raise ServiceValidationError(
+                f"Unsupported media type {media_type!r}; use app"
+            )
+        app = resolve_app(self.hub.tv.apps, media_id)
+        if app is None:
+            raise ServiceValidationError(
+                f"Unknown app {media_id!r}; browse Applications on this media player"
+            )
+        with tv_errors():
+            await self.hub.async_launch_resolved_app(app)
+
+    async def async_browse_media(
+        self,
+        media_content_type: str | None = None,
+        media_content_id: str | None = None,
+    ) -> BrowseMedia:
+        if (
+            (media_content_type is None and media_content_id is None)
+            or media_content_id in ("", "apps")
+            or media_content_type in (MediaType.APPS, "apps")
+        ):
+            return BrowseMedia(
+                title="Applications",
+                media_class=MediaClass.APP,
+                media_content_id="apps",
+                media_content_type=MediaType.APPS,
+                can_play=False,
+                can_expand=True,
+                children=[_app_item(app) for app in self.hub.tv.apps],
+                children_media_class=MediaClass.APP,
+            )
+        raise BrowseError("Media not found")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        tv = self.coordinator.client.state
+        tv = self.hub.client.state
         return {
             "statetype": tv.statetype,
             "auth_mode": tv.auth_mode,
             "source_id": tv.source_id,
-            "power_on_mode": self.coordinator.power_on_mode,
+            "power_on_mode": self.hub.power_on_mode,
             "apps": [format_app_title(app) for app in tv.apps if format_app_title(app)],
             "custom_sources": [
                 {
                     "name": item["name"],
                     "keys": list(item["keys"]),
+                    **({"hidden": True} if item.get("hidden") else {}),
                 }
-                for item in self.coordinator.custom_sources
+                for item in self.hub.custom_sources
             ],
         }
+
+
+def _app_item(app: dict[str, Any]) -> BrowseMedia:
+    icon = str(app.get("icon") or "")
+    thumbnail = icon if icon.startswith("http") else None
+    return BrowseMedia(
+        title=format_app_title(app) or str(app.get("name") or ""),
+        media_class=MediaClass.APP,
+        media_content_id=app_media_id(app),
+        media_content_type=MediaType.APP,
+        can_play=True,
+        can_expand=False,
+        thumbnail=thumbnail,
+    )

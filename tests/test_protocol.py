@@ -5,6 +5,11 @@ from __future__ import annotations
 import time
 
 
+def test_platforms_include_hidden_buttons(proto_const) -> None:
+    assert proto_const.PLATFORMS == ("media_player", "remote", "button")
+    assert proto_const.ATTR_HIDDEN == "hidden"
+
+
 def test_key_aliases_match_aijia(proto_keys) -> None:
     assert proto_keys.normalize_key("power") == proto_keys.KEY_POWER
     assert proto_keys.normalize_key("KEY_HOME") == proto_keys.KEY_HOME
@@ -13,6 +18,8 @@ def test_key_aliases_match_aijia(proto_keys) -> None:
     assert proto_keys.normalize_key("returns") == "KEY_RETURNS"
     assert proto_keys.normalize_key("settings") == proto_keys.KEY_CONTROL_CENTER
     assert proto_keys.normalize_key("screenshot") == "screenshot"
+    assert proto_keys.normalize_key("截屏") == "screenshot"
+    assert proto_keys.normalize_key("capture") == "screenshot"
 
 
 def test_aijia_remoter_has_screenshot_keys(proto_keys) -> None:

@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_MAC, CONF_NAME, CONF_PORT, Platform
+from homeassistant.const import CONF_HOST, CONF_MAC, CONF_NAME, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
@@ -35,15 +35,16 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_SOURCE_KEY_DELAY,
     DOMAIN,
+    PLATFORMS,
 )
-from .coordinator import HisenseTvCoordinator
 from .credentials import stable_client_uuid
+from .hub import HisenseTvHub
 from .power import normalize_power_on_entity
 from .tv_client import HisenseTvClient
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.MEDIA_PLAYER, Platform.REMOTE, Platform.BUTTON]
+HisenseTvConfigEntry = ConfigEntry
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -108,14 +109,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             err,
         )
 
-    coordinator = HisenseTvCoordinator(
+    hub = HisenseTvHub(
         hass,
         client,
         data.get(CONF_NAME, host),
         entry,
         power_on_button=power_on_button,
     )
-    coordinator.configure_power_on(
+    hub.configure_power_on(
         mode=data.get(CONF_POWER_ON_MODE),
         button=power_on_button,
         remote=power_on_remote,
@@ -123,22 +124,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device=data.get(CONF_POWER_ON_DEVICE),
         mac=data.get(CONF_MAC),
     )
-    coordinator.configure_volume_buttons(
+    hub.configure_volume_buttons(
         volume_up=data.get(CONF_VOLUME_UP_BUTTON),
         volume_down=data.get(CONF_VOLUME_DOWN_BUTTON),
     )
-    coordinator.configure_custom_sources(
+    hub.configure_custom_sources(
         data.get(CONF_CUSTOM_SOURCES),
         delay=data.get(CONF_SOURCE_KEY_DELAY, DEFAULT_SOURCE_KEY_DELAY),
     )
-    await coordinator.async_config_entry_first_refresh()
+    await hub.async_config_entry_first_refresh()
 
+    entry.runtime_data = hub
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_CLIENT: client,
-        DATA_COORDINATOR: coordinator,
+        DATA_COORDINATOR: hub,
     }
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    from .config_flow import OPTIONS_FLOW_RELOADS
+
+    if not OPTIONS_FLOW_RELOADS:
+        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
 
@@ -148,6 +153,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     stored = hass.data[DOMAIN].pop(entry.entry_id, None)
     if stored and DATA_CLIENT in stored:
         await stored[DATA_CLIENT].async_disconnect()
+    if getattr(entry, "runtime_data", None) is not None:
+        try:
+            entry.runtime_data = None  # type: ignore[assignment]
+        except (AttributeError, TypeError):
+            pass
     return unload_ok
 
 

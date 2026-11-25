@@ -15,6 +15,14 @@ try:
     from homeassistant.config_entries import ConfigFlowResult
 except ImportError:  # pragma: no cover - HA < 2024.4
     from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult
+
+try:
+    from homeassistant.config_entries import OptionsFlowWithReload
+
+    OPTIONS_FLOW_RELOADS = True
+except ImportError:  # pragma: no cover - HA < 2024.11
+    OptionsFlowWithReload = config_entries.OptionsFlow  # type: ignore[misc,assignment]
+    OPTIONS_FLOW_RELOADS = False
 from homeassistant.helpers.selector import (
     EntitySelector,
     EntitySelectorConfig,
@@ -319,11 +327,13 @@ class HisenseE7NConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> OptionsFlow:
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> OptionsFlowWithReload:
         return HisenseE7NOptionsFlow(config_entry)
 
 
-class HisenseE7NOptionsFlow(config_entries.OptionsFlow):
+class HisenseE7NOptionsFlow(OptionsFlowWithReload):
     """Tune host/power-on, or build custom inputs from remoter buttons."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry | None = None) -> None:

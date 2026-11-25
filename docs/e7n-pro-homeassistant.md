@@ -32,9 +32,9 @@ E7N Pro（以及同代 E7N / E7NQ Pro）固件在 2024 之后通常还要：
 
 ## 集成做什么
 
-`custom_components/hisense_e7n`：
+`custom_components/hisense_e7n`（1.23.0 起布局对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，应用走媒体浏览器）：
 
-- `media_player`：开关、音量、静音、输入源、应用、上一台/下一台；**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`
+- `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台；安装的应用在 **媒体浏览器**（`browse_media` / `play_media`，类型 `app`），也保留 `hisense_e7n.launch_app`。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量只有 +/-（`VOLUME_STEP`），没有滑块
 - `remote`：发送 `KEY_*`（可用 Universal Remote Card）；关机状态下的电源键走同一套开机方式
 - `button`：爱家「电视」遥控页同款按键（电源、音量、截屏、信号源、AI识图、设置、方向键、OK、返回、首页、菜单），以及自定义输入源按钮。新实体默认隐藏；升级后也会把已有按钮标成 `hidden_by=integration`（不禁用），设备页「控制」里不再列出，仍可通过 `button.press` / 自动化 / 脚本调用。「切换遥控模式」和底部语音是手机 App 能力，不映射成电视键
 - 配置流：填 IP 即可。不需要蓝牙地址。若电视屏幕弹出 4 位数字，调用 `hisense_e7n.submit_code`
@@ -115,9 +115,10 @@ data:
 
 保存后：
 
-- `media_player` 的输入源列表最前面按你排好的顺序出现这些名称；选中时按顺序发键
+- `media_player` 的输入源列表最前面按你排好的顺序出现这些名称（不含应用）；选中时按顺序发键
 - 设备下会多出同名 `button`（顺序相同，默认隐藏，自动化里仍可用），按下同样跑整段组合
 - 开机后第一次切源会先等本机遥控口（7778/7779）就绪，并重试「信号源」，避免丢掉组合里的第一键
+- 已安装应用改到媒体浏览器里点选，或 `media_player.play_media`（`media_content_type: app`）。旧自动化里 `select_source` 填应用名仍然会打开该应用
 
 可选 button：信号源、方向键、OK、返回、首页、菜单、设置。修改选项后集成会重载，旧的自定义按钮若已改名会留在实体注册表里，可手动删除。
 
