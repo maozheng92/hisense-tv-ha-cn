@@ -94,7 +94,7 @@
           "source_key_delay": "Default pause between presses"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page.",
+          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "mac": "Wi-Fi MAC for Wake-on-LAN. Required when power-on is Wake-on-LAN.",
           "source_key_delay": "Default seconds to wait after each press except the last. Each source can override this."
         }
@@ -109,7 +109,7 @@
           "power_on_remote": "Infrared remote"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page.",
+          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "power_on_remote": "A Home Assistant remote entity that has learned IR codes."
         }
       },
@@ -122,7 +122,7 @@
           "power_on_command": "Command"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page.",
+          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "power_on_device": "Device name from the remote's learned codes. Required for Harmony Hub and Xiaomi Home.",
           "power_on_command": "Command name from that device (for example Power or power_on)."
         }
@@ -138,7 +138,7 @@
           "音量减按钮": "音量减按钮"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page.",
+          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "音量加按钮": "可选。音量加会按下这个实体，不再发电视 LAN 键。",
           "音量减按钮": "可选。音量减会按下这个实体，不再发电视 LAN 键。"
         }
@@ -164,7 +164,7 @@
           "interval": "Pause between presses"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page.",
+          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "name": "Shown on media_player.select_source (for example HDMI 1).",
           "hidden": "Keep the source configured but omit it from the TV source list.",
           "interval": "Seconds to wait after each press except the last."
@@ -178,7 +178,7 @@
           "name": "Source"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page."
+          "go_back": "Choose this, then submit. This page is not written to the draft."
         }
       },
       "source_form": {
@@ -192,7 +192,7 @@
           "edit_sequence": "Replace press sequence"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page.",
+          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "name": "Shown on media_player.select_source (for example HDMI 1).",
           "hidden": "Keep the source configured but omit it from the TV source list.",
           "interval": "Seconds to wait after each press except the last.",
@@ -216,7 +216,7 @@
           "actions": "Items"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page.",
+          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "actions": "Drag to reorder. Each item is listed once; repeats are set on the next screen."
         }
       },
@@ -248,7 +248,7 @@
           "add_more": "Add another group"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page.",
+          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "add_more": "Turn on to append more TV keys or button entities after these."
         }
       },
@@ -260,7 +260,7 @@
           "name": "Source"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page."
+          "go_back": "Choose this, then submit. This page is not written to the draft."
         }
       },
       "source_reorder": {
@@ -271,7 +271,7 @@
           "source_order": "Order"
         },
         "data_description": {
-          "go_back": "Turn on and submit to return to the previous screen without applying this page."
+          "go_back": "Choose this, then submit. This page is not written to the draft."
         }
       }
     },
@@ -295,14 +295,14 @@
       "tv": {
         "name": "TV"
       }
-    },
-    "remote": {
-      "remote": {
-        "name": "Remote"
-      }
     }
   },
   "selector": {
+    "go_back_choice": {
+      "options": {
+        "go_back": "Go back"
+      }
+    },
     "power_on_mode": {
       "options": {
         "button": "Button, switch, or script",

@@ -53,6 +53,12 @@ def test_zh_uses_button_entity_name() -> None:
     assert zh["config"]["step"]["volume"]["data"]["音量加按钮"] == "音量加按钮"
     assert "entity" in zh
     assert "button" not in zh["entity"]
+    assert "remote" not in zh["entity"]
+    assert zh["selector"]["go_back_choice"]["options"]["go_back"] == "返回上一界面"
+    for step_id in _FORM_STEPS:
+        helper = zh["options"]["step"][step_id]["data_description"]["go_back"]
+        assert "打开后点提交" not in helper
+        assert "点选" in helper
 
 
 def test_strings_and_en_match_tcl_source_ux() -> None:
@@ -69,4 +75,28 @@ def test_strings_and_en_match_tcl_source_ux() -> None:
         assert step["source_reorder"]["data"]["source_order"] == "Order"
         for step_id in _FORM_STEPS:
             assert step[step_id]["data"]["go_back"] == "Go back"
+            helper = step[step_id]["data_description"]["go_back"]
+            assert "Turn on and submit" not in helper
         assert "button" not in data.get("entity", {})
+        assert "remote" not in data.get("entity", {})
+        assert data["selector"]["go_back_choice"]["options"]["go_back"] == "Go back"
+
+
+def test_go_back_is_not_a_boolean_switch() -> None:
+    text = (_ROOT / "config_flow.py").read_text(encoding="utf-8")
+    helper = text.split("def _with_back", 1)[1].split("def _show_form", 1)[0]
+    assert "BooleanSelector" not in helper
+    assert "_go_back_selector" in helper
+    assert "button_toggle" in text
+    assert "description_placeholders" in text.split("def _show_form", 1)[1].split("def _menu_placeholders", 1)[0]
+
+
+def test_remote_entity_matches_tcl_unnamed_device() -> None:
+    text = (_ROOT / "remote.py").read_text(encoding="utf-8")
+    assert "_attr_name = None" in text
+    assert '_attr_name = "Remote"' not in text
+    assert "_attr_icon" not in text
+    assert "_attr_translation_key" not in text
+    assert "_attr_entity_picture" not in text
+    assert "_attr_device_class" not in text
+    assert "mdi:remote" not in text

@@ -137,11 +137,60 @@ POWER_ON_MODE_SELECTOR = SelectSelector(
 )
 
 
+def _go_back_chosen(value: Any) -> bool:
+    """True when the Go-back control was selected (toggle, list, or toggle-button)."""
+    if value in (True, ATTR_GO_BACK, "true", "1", 1):
+        return True
+    if isinstance(value, (list, tuple)):
+        return any(_go_back_chosen(item) for item in value)
+    return False
+
+
+def _go_back_selector() -> Any:
+    """Closest HA control to a footer Submit: button-toggle, else list/box.
+
+    Config flows cannot add a second dialog-footer button. TCL's Go back is a
+    boolean switch; this integration uses a one-option button-toggle (or a
+    list/box select) so the control is a button, not a switch.
+    """
+    options = [ATTR_GO_BACK]
+    try:
+        from homeassistant.helpers.selector import selector as ha_selector
+
+        return ha_selector(
+            {
+                "button_toggle": {
+                    "options": options,
+                    "translation_key": "go_back_choice",
+                }
+            }
+        )
+    except (ImportError, vol.Invalid, KeyError, TypeError, ValueError):
+        pass
+    for mode in ("box", SelectSelectorMode.LIST):
+        try:
+            return SelectSelector(
+                SelectSelectorConfig(
+                    options=options,
+                    mode=mode,  # type: ignore[arg-type]
+                    translation_key="go_back_choice",
+                )
+            )
+        except (vol.Invalid, ValueError, TypeError):
+            continue
+    return SelectSelector(
+        SelectSelectorConfig(
+            options=options,
+            translation_key="go_back_choice",
+        )
+    )
+
+
 class _SchemaWithBack(vol.Schema):
-    """Accept ``{go_back: True}`` so Back does not require other fields."""
+    """Accept Go back so it does not require other fields."""
 
     def __call__(self, data: Any) -> Any:
-        if isinstance(data, dict) and data.get(ATTR_GO_BACK):
+        if isinstance(data, dict) and _go_back_chosen(data.get(ATTR_GO_BACK)):
             return {ATTR_GO_BACK: True}
         return super().__call__(data)
 
@@ -399,13 +448,11 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
         self._draft_ready = True
 
     def _wants_back(self, user_input: dict[str, Any] | None) -> bool:
-        return bool(user_input and user_input.get(ATTR_GO_BACK))
+        return bool(user_input) and _go_back_chosen(user_input.get(ATTR_GO_BACK))
 
     def _with_back(self, schema: vol.Schema | dict[Any, Any]) -> vol.Schema:
         mapping = schema.schema if isinstance(schema, vol.Schema) else schema
-        fields: dict[Any, Any] = {
-            vol.Optional(ATTR_GO_BACK, default=False): BooleanSelector()
-        }
+        fields: dict[Any, Any] = {}
         for key, typ in mapping.items():
             if isinstance(key, vol.Required):
                 default = getattr(key, "_default", getattr(key, "default", vol.UNDEFINED))
@@ -415,6 +462,9 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
                     fields[vol.Optional(key.schema, default=default)] = typ
             else:
                 fields[key] = typ
+        # Last field, immediately above the footer Submit (HA cannot add a
+        # second dialog-footer button from a config flow).
+        fields[vol.Optional(ATTR_GO_BACK)] = _go_back_selector()
         return _SchemaWithBack(fields)
 
     def _show_form(
@@ -425,14 +475,18 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
         errors: dict[str, str] | None = None,
         placeholders: dict[str, str] | None = None,
     ) -> ConfigFlowResult:
+        merged: dict[str, str] = {"host": "—"}
+        if self._draft_ready:
+            merged.update(self._menu_placeholders())
+        if placeholders:
+            merged.update(placeholders)
         kwargs: dict[str, Any] = {
             "step_id": step_id,
             "data_schema": self._with_back(schema),
+            "description_placeholders": merged,
         }
         if errors:
             kwargs["errors"] = errors
-        if placeholders is not None:
-            kwargs["description_placeholders"] = placeholders
         return self.async_show_form(**kwargs)
 
     def _menu_placeholders(self) -> dict[str, str]:

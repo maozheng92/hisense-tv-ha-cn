@@ -46,11 +46,13 @@ async def async_setup_entry(
 
 
 class HisenseTvRemote(HisenseTvEntity, RemoteEntity):
-    """Send individual remote keys (works with Universal Remote Card)."""
+    """Send individual remote keys (works with Universal Remote Card).
 
-    _attr_name = "Remote"
-    _attr_icon = "mdi:remote"
-    _attr_translation_key = "remote"
+    Matches tcl_tv: unnamed entity so HA uses the device name and the
+    remote platform default icon.
+    """
+
+    _attr_name = None
 
     def __init__(self, hub: HisenseTvHub, entry: ConfigEntry) -> None:
         super().__init__(hub, entry)

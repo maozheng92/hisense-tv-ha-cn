@@ -92,7 +92,7 @@
           "source_key_delay": "默认按键间隔"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。",
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。",
           "mac": "开机方式为网络唤醒时必填。",
           "source_key_delay": "每次按下后等待的秒数（最后一次除外）。每个输入源可以单独覆盖。"
         }
@@ -107,7 +107,7 @@
           "power_on_remote": "红外遥控"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。",
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。",
           "power_on_remote": "已学习红外码的 Home Assistant remote 实体。"
         }
       },
@@ -120,7 +120,7 @@
           "power_on_command": "指令"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。",
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。",
           "power_on_device": "红外码库中的设备名。Harmony Hub 与小米万能遥控必填。",
           "power_on_command": "该设备下的指令名，例如 Power 或 power_on。"
         }
@@ -136,7 +136,7 @@
           "音量减按钮": "音量减按钮"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。",
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。",
           "音量加按钮": "可选。音量加会按下这个实体，不再发电视 LAN 键。",
           "音量减按钮": "可选。音量减会按下这个实体，不再发电视 LAN 键。"
         }
@@ -162,7 +162,7 @@
           "interval": "按键间隔"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。",
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。",
           "name": "出现在 media_player.select_source 中，例如 HDMI 1。",
           "hidden": "仍保留配置，但不显示在电视输入源列表。",
           "interval": "每次按下后等待的秒数（最后一次除外）。"
@@ -176,7 +176,7 @@
           "name": "输入源"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。"
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。"
         }
       },
       "source_form": {
@@ -190,7 +190,7 @@
           "edit_sequence": "重新设置按键序列"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。",
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。",
           "name": "出现在 media_player.select_source 中，例如 HDMI 1。",
           "hidden": "仍保留配置，但不显示在电视输入源列表。",
           "interval": "每次按下后等待的秒数（最后一次除外）。",
@@ -214,7 +214,7 @@
           "actions": "可选内容"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。",
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。",
           "actions": "可拖动排序。列表里每项只出现一次，重复次数在下一页填写。"
         }
       },
@@ -246,7 +246,7 @@
           "add_more": "继续添加另一组"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。",
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。",
           "add_more": "打开后可以再选本集成按键或按钮实体，接到当前序列后面。"
         }
       },
@@ -258,7 +258,7 @@
           "name": "输入源"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。"
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。"
         }
       },
       "source_reorder": {
@@ -269,7 +269,7 @@
           "source_order": "顺序"
         },
         "data_description": {
-          "go_back": "打开后点提交，回到上一页，本页改动不会写入草稿。"
+          "go_back": "点选此项后点提交即可返回。本页改动不会写入草稿。"
         }
       }
     },
@@ -292,11 +292,6 @@
     "media_player": {
       "tv": {
         "name": "电视"
-      }
-    },
-    "remote": {
-      "remote": {
-        "name": "遥控器"
       }
     }
   },
@@ -327,6 +322,11 @@
     }
   },
   "selector": {
+    "go_back_choice": {
+      "options": {
+        "go_back": "返回上一界面"
+      }
+    },
     "power_on_mode": {
       "options": {
         "button": "按钮、开关或脚本",
