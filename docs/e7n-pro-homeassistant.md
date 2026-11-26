@@ -97,7 +97,7 @@ data:
 | 方向键 / OK | `KEY_UP` `KEY_DOWN` `KEY_LEFT` `KEY_RIGHT` `KEY_OK` |
 | 返回 / 首页 / 菜单 | `KEY_RETURNS` / `KEY_HOME` / `KEY_MENU` |
 
-其它爱家字面量：`KEY_MULTITASK`、`KEY_BRIGHTUP` / `KEY_BRIGHTDOWN`、`KEY_JUBAO`。别名如 `home`、`ok`、`mute` 也可以。
+其它爱家字面量：`KEY_MULTITASK`、`KEY_BRIGHTUP` / `KEY_BRIGHTDOWN`、`KEY_JUBAO`。别名如 `home`、`ok`、`mute` 也可以。完整 `remote.send_command` 命令表（全部 `KEY_*`、别名、输入源宏）见仓库 [README.md](../README.md#remotesend_command)。
 
 ## 自定义输入源
 
