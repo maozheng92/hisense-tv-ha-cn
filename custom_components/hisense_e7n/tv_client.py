@@ -248,6 +248,18 @@ class TvState:
     screenshot_media_id: str | None = None
     screenshot_note: str = ""
 
+    def media_volume_level(self) -> float | None:
+        """Home Assistant ``volume_level`` (0–1) from VIDAA 0–100."""
+        if self.volume is None:
+            return None
+        return max(0.0, min(1.0, float(self.volume) / 100.0))
+
+    def media_is_volume_muted(self) -> bool | None:
+        """Home Assistant ``is_volume_muted``. Unknown while the TV is off."""
+        if not self.available:
+            return None
+        return bool(self.muted)
+
 
 class HisenseTvClient:
     """Threaded paho client with asyncio-friendly helpers."""
@@ -399,6 +411,16 @@ class HisenseTvClient:
         if topic and (level is not None or mute is not None or volume_type is not None):
             self._note_volume_topic(topic)
 
+    def _apply_volume_tree(self, data: Any, *, topic: str | None = None) -> None:
+        """Walk screenshot / nested platform payloads for volume and mute."""
+        self._apply_volume(data, topic=topic)
+        if not isinstance(data, dict):
+            return
+        for key in ("infoPackage", "curAppInfo", "data", "volumeinfo", "volumeInfo"):
+            inner = data.get(key)
+            if isinstance(inner, dict):
+                self._apply_volume_tree(inner, topic=topic)
+
     def _apply_state(self, data: Any, *, topic: str | None = None) -> None:
         if not isinstance(data, dict):
             if isinstance(data, str) and data:
@@ -504,7 +526,11 @@ class HisenseTvClient:
             self.state.needs_pin = False
             self._set_loop_event(self._token_event)
             self._set_loop_event(self._pin_event)
-        elif topic.endswith("/data/state") or topic.endswith("/ui_service/state"):
+        elif (
+            topic.endswith("/data/state")
+            or topic.endswith("/ui_service/state")
+            or topic.endswith("/ui_service/data/state")
+        ):
             self._apply_state(data, topic=topic)
         elif topic.endswith("/data/sourcelist"):
             self._apply_sources(data)
@@ -895,6 +921,7 @@ class HisenseTvClient:
         """Download the current frame. The caller stores it in the Image media source."""
         shot = capture_screen(self.host)
         self.state.screenshot_note = shot.note
+        self._apply_volume_tree(getattr(shot, "info", None), topic="screenshot")
         self._notify()
         _LOGGER.info("Captured TV screenshot (%s bytes)", len(shot.image))
         return shot.image

@@ -105,22 +105,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         control_username=data.get(CONF_CONTROL_USERNAME),
         loop=hass.loop,
     )
-
-    try:
-        await client.async_connect()
-    except ConnectionError as err:
-        # Broker is down when the TV is fully off; still load if we can press
-        # a power-on button or fall back to Wake-on-LAN.
-        if not power_on_button and not power_on_remote and not data.get(CONF_MAC):
-            raise ConfigEntryNotReady(f"Cannot reach Hisense TV at {host}:{port}") from err
-        _LOGGER.warning(
-            "TV at %s:%s is offline; turn-on will call %s (%s)",
-            host,
-            port,
-            power_on_button or power_on_remote or data.get(CONF_MAC),
-            err,
-        )
-
     hub = HisenseTvHub(
         hass,
         client,
@@ -144,6 +128,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         data.get(CONF_CUSTOM_SOURCES),
         delay=data.get(CONF_SOURCE_KEY_DELAY, DEFAULT_SOURCE_KEY_DELAY),
     )
+
+    try:
+        await client.async_connect()
+    except ConnectionError as err:
+        # Broker is down when the TV is fully off; still load if we can press
+        # a power-on button or fall back to Wake-on-LAN.
+        if not power_on_button and not power_on_remote and not data.get(CONF_MAC):
+            raise ConfigEntryNotReady(f"Cannot reach Hisense TV at {host}:{port}") from err
+        _LOGGER.warning(
+            "TV at %s:%s is offline; turn-on will call %s (%s)",
+            host,
+            port,
+            power_on_button or power_on_remote or data.get(CONF_MAC),
+            err,
+        )
+
     await hub.async_config_entry_first_refresh()
     async_remove_legacy_button_entities(hass, entry)
 

@@ -66,6 +66,9 @@ VOLUME_UNKNOWN_FLOOR_STEPS = 100
 # LAN remoter KEY (volume +/-) can drop MQTT 36669 for a moment. Do not flip
 # media_player on→off→on until the broker stays down this long.
 MQTT_DISCONNECT_GRACE = 3.0
+# This E7N often omits volumechange; poll gettvstate/getvolume so
+# ui_service/state volume_value (seen on the volume OSD) still fills HA.
+VOLUME_POLL_SECONDS = 8.0
 CONF_CUSTOM_SOURCE_NAME = "custom_source_name"
 CONF_SOURCE_NAME_ACTION = "source_name_action"
 CONF_SEQUENCE_BUTTON = "sequence_button"

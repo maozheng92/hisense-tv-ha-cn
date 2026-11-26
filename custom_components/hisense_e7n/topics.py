@@ -105,6 +105,7 @@ _MOBILE_DATA = (
 
 _BROADCASTS = (
     "/remoteapp/mobile/broadcast/ui_service/state",
+    "/remoteapp/mobile/broadcast/ui_service/data/state",
     "/remoteapp/mobile/broadcast/ui_service/data/applist",
     "/remoteapp/mobile/broadcast/ui_service/volume",
     "/remoteapp/mobile/broadcast/ui_service/data/volume",

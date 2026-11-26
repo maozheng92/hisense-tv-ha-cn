@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.components import persistent_notification
@@ -28,6 +29,7 @@ from .const import (
     DOMAIN,
     LEGACY_SOURCE_KEY_DELAYS,
     POWER_ON_MODE_WOL,
+    VOLUME_POLL_SECONDS,
 )
 from .custom_sources import (
     KIND_KEY,
@@ -62,7 +64,7 @@ def hub_from_entry(hass: HomeAssistant, entry: ConfigEntry) -> HisenseTvHub:
 
 
 class HisenseTvHub(DataUpdateCoordinator[TvState]):
-    """Expose TV state to entities. Updates come from MQTT, not polling."""
+    """Expose TV state to entities. MQTT push plus a short getvolume poll."""
 
     def __init__(
         self,
@@ -77,7 +79,7 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
             hass,
             logger=logging.getLogger(__name__),
             name=f"{DOMAIN}_{name}",
-            update_interval=None,
+            update_interval=timedelta(seconds=VOLUME_POLL_SECONDS),
         )
         self.client = client
         self.config_entry = entry
@@ -97,7 +99,8 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
 
     @property
     def tv(self) -> TvState:
-        return self.data or self.client.state
+        """Live client state (MQTT mutates this object)."""
+        return self.client.state
 
     @property
     def visible_source_names(self) -> list[str]:
@@ -384,11 +387,16 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
             )
 
     async def _async_update_data(self) -> TvState:
-        if self.client.state.available:
+        state = self.client.state
+        if (
+            state.available
+            and not state.needs_pin
+            and not state.pin_requested
+        ):
             try:
                 await self.hass.async_add_executor_job(self.client.refresh_status)
             except Exception:  # noqa: BLE001
-                self.logger.debug("Manual status refresh failed", exc_info=True)
+                self.logger.debug("gettvstate/getvolume poll failed", exc_info=True)
         return self.client.state
 
     async def async_turn_on(self) -> None:

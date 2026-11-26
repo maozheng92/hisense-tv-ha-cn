@@ -22,7 +22,7 @@ from homeassistant.components.media_player import (
     MediaType,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_platform
@@ -98,6 +98,17 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
     def __init__(self, hub: HisenseTvHub, entry: ConfigEntry) -> None:
         super().__init__(hub, entry)
         self._attr_unique_id = f"{entry.entry_id}_media_player"
+        self._sync_volume_attrs()
+
+    def _sync_volume_attrs(self) -> None:
+        tv = self.hub.tv
+        self._attr_volume_level = tv.media_volume_level()
+        self._attr_is_volume_muted = tv.media_is_volume_muted()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._sync_volume_attrs()
+        super()._handle_coordinator_update()
 
     @property
     def supported_features(self) -> MediaPlayerEntityFeature:
@@ -120,18 +131,13 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
 
     @property
     def volume_level(self) -> float | None:
-        volume = self.hub.tv.volume
-        if volume is None:
-            return None
-        return max(0.0, min(1.0, volume / 100.0))
+        """Current level from ui_service/state, getvolume, or volumechange."""
+        return self.hub.tv.media_volume_level()
 
     @property
     def is_volume_muted(self) -> bool | None:
-        """VIDAA MQTT ``volumechange`` reports mute (``mute`` / type 2)."""
-        tv = self.hub.tv
-        if not tv.available:
-            return None
-        return tv.muted
+        """Mute from the same inbound payloads as volume_level."""
+        return self.hub.tv.media_is_volume_muted()
 
     @property
     def media_title(self) -> str | None:

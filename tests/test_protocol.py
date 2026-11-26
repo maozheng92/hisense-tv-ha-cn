@@ -82,6 +82,7 @@ def test_pair_topic_and_subscriptions_are_concrete(proto_client, proto_credentia
     subs = proto_topics.subscription_topics(creds)
     assert not any(item.endswith("#") or "/+" in item for item in subs)
     assert "/remoteapp/mobile/broadcast/ui_service/state" in subs
+    assert "/remoteapp/mobile/broadcast/ui_service/data/state" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/data/volumechange" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/actions/volumechange" in subs
