@@ -96,17 +96,24 @@ _MOBILE_DATA = (
     ("ui_service", "sourcelist"),
     ("ui_service", "applist"),
     ("ui_service", "vidaa_app_connect"),
+    ("ui_service", "volume"),
     ("platform_service", "volume"),
+    ("platform_service", "volumechange"),
+    ("platform_service", "getvolume"),
     ("platform_service", "tokenissuance"),
 )
 
 _BROADCASTS = (
     "/remoteapp/mobile/broadcast/ui_service/state",
     "/remoteapp/mobile/broadcast/ui_service/data/applist",
+    "/remoteapp/mobile/broadcast/ui_service/volume",
+    "/remoteapp/mobile/broadcast/ui_service/data/volume",
     "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep",
     "/remoteapp/mobile/broadcast/platform_service/data/volumechange",
     "/remoteapp/mobile/broadcast/platform_service/actions/volumechange",
     "/remoteapp/mobile/broadcast/platform_service/volume",
+    "/remoteapp/mobile/broadcast/platform_service/data/volume",
+    "/remoteapp/mobile/broadcast/platform_service/data/getvolume",
 )
 
 

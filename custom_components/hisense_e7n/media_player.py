@@ -1,7 +1,9 @@
 """TV media player for Hisense E7N Pro.
 
 Layout follows TCL: HDMI/custom macros on source_list, installed apps in
-Media Browser (browse_media / play_media). VOLUME_SET is never advertised.
+Media Browser (browse_media / play_media). VOLUME_SET is advertised so HA
+exposes ``volume_level``; control stays LAN KEY_VOLUME +/- (or optional HA
+buttons). Dragging the slider does not send MQTT ``changevolume``.
 """
 
 from __future__ import annotations
@@ -49,12 +51,13 @@ from .keys import (
     KEY_VOLUMEUP,
 )
 
-# No VOLUME_SET: +/- uses MQTT sendkey KEY_VOLUME* + LAN remoter (eARC).
-# VOLUME_STEP only — never a HA slider.
+# VOLUME_SET is required for HA to put volume_level on the state object.
+# Control is still VOLUME_STEP (LAN KEY_VOLUME* / optional HA buttons).
 _BASE_SUPPORT = (
     MediaPlayerEntityFeature.TURN_ON
     | MediaPlayerEntityFeature.TURN_OFF
     | MediaPlayerEntityFeature.VOLUME_MUTE
+    | MediaPlayerEntityFeature.VOLUME_SET
     | MediaPlayerEntityFeature.VOLUME_STEP
     | MediaPlayerEntityFeature.PLAY
     | MediaPlayerEntityFeature.PAUSE
@@ -162,6 +165,13 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         await self.hub.async_send_key(KEY_VOLUMEDOWN)
         self.async_write_ha_state()
 
+    async def async_set_volume_level(self, volume: float) -> None:
+        """HA shows volume_level only with VOLUME_SET. Do not use changevolume."""
+        del volume
+        with tv_errors():
+            await self.hass.async_add_executor_job(self.hub.client.refresh_volume)
+        self.async_write_ha_state()
+
     async def async_mute_volume(self, mute: bool) -> None:
         tv = self.hub.client.state
         if tv.muted != mute:
@@ -241,6 +251,9 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             "statetype": tv.statetype,
             "auth_mode": tv.auth_mode,
             "source_id": tv.source_id,
+            "volume": tv.volume,
+            "volume_type": tv.volume_type,
+            "volume_topic": tv.volume_topic,
             "power_on_mode": self.hub.power_on_mode,
             "apps": [format_app_title(app) for app in tv.apps if format_app_title(app)],
             "custom_sources": [

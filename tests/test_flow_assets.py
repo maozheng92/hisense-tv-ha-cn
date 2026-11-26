@@ -136,10 +136,19 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_23_8() -> None:
+def test_version_is_1_23_9() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.23.8"
+    assert manifest["version"] == "1.23.9"
     assert not (_ROOT / "www").exists()
+
+
+def test_media_player_exposes_mqtt_volume() -> None:
+    text = (_ROOT / "media_player.py").read_text(encoding="utf-8")
+    assert "VOLUME_SET" in text
+    assert "async_set_volume_level" in text
+    assert "refresh_volume" in text
+    assert "volume_topic" in text
+    assert "changevolume" in text
 
 
 def test_sources_menu_save_is_footer_not_row() -> None:
