@@ -10,6 +10,7 @@ from homeassistant.const import CONF_HOST, CONF_MAC, CONF_NAME, CONF_PORT
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
+from .button_visibility import async_remove_legacy_button_entities
 from .certs_util import resolve_cert_candidates
 from .const import (
     CONF_ACCESS_TOKEN,
@@ -133,6 +134,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         delay=data.get(CONF_SOURCE_KEY_DELAY, DEFAULT_SOURCE_KEY_DELAY),
     )
     await hub.async_config_entry_first_refresh()
+    async_remove_legacy_button_entities(hass, entry)
 
     entry.runtime_data = hub
     hass.data[DOMAIN][entry.entry_id] = {

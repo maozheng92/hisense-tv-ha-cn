@@ -123,8 +123,12 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         return max(0.0, min(1.0, volume / 100.0))
 
     @property
-    def is_volume_muted(self) -> bool:
-        return self.hub.tv.muted
+    def is_volume_muted(self) -> bool | None:
+        """VIDAA MQTT ``volumechange`` reports mute (``mute`` / type 2)."""
+        tv = self.hub.tv
+        if not tv.available:
+            return None
+        return tv.muted
 
     @property
     def media_title(self) -> str | None:
@@ -242,7 +246,8 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             "custom_sources": [
                 {
                     "name": item["name"],
-                    "keys": list(item["keys"]),
+                    "keys": list(item.get("keys") or []),
+                    "buttons": list(item.get("buttons") or item.get("keys") or []),
                     **({"hidden": True} if item.get("hidden") else {}),
                 }
                 for item in self.hub.custom_sources

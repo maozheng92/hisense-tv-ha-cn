@@ -100,6 +100,33 @@ def test_move_custom_source_reorders_list(proto_custom_sources) -> None:
     assert [item["name"] for item in clamped] == ["AV", "HDMI1", "HDMI2"]
 
 
+def test_classify_source_action_keys_and_ha_buttons(proto_custom_sources) -> None:
+    classify = proto_custom_sources.classify_source_action
+    assert classify("source") == ("key", "KEY_SOURCE")
+    assert classify("KEY_RIGHT") == ("key", "KEY_RIGHT")
+    assert classify("ok") == ("key", "KEY_OK")
+    assert classify("button.living_hdmi") == ("button", "button.living_hdmi")
+    assert classify("switch.not_a_button") is None
+    assert classify("key:source") == ("key", "KEY_SOURCE")
+    assert classify("key:nope") is None
+    payload = proto_custom_sources.source_payload(
+        name="HDMI1",
+        hidden=False,
+        buttons=["source", "right", "right", "ok"],
+        interval=0.1,
+    )
+    assert payload["keys"] == ["KEY_SOURCE", "KEY_RIGHT", "KEY_RIGHT", "KEY_OK"]
+    assert payload["buttons"] == ["source", "right", "right", "ok"]
+    collapsed = proto_custom_sources.collapse_source_actions(payload["buttons"])
+    assert collapsed == [("source", 1), ("right", 2), ("ok", 1)]
+    assert proto_custom_sources.expand_source_steps(collapsed) == [
+        "source",
+        "right",
+        "right",
+        "ok",
+    ]
+
+
 def test_hidden_sources_stay_callable_but_leave_source_list(proto_custom_sources) -> None:
     sources = proto_custom_sources.normalize_custom_sources(
         [

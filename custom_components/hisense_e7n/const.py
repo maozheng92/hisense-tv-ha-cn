@@ -34,6 +34,8 @@ CONF_BLE_ADDRESS = "ble_address"
 CONF_CUSTOM_SOURCES = "custom_sources"
 CONF_CUSTOM_SOURCES_TEXT = "custom_sources_text"
 CONF_SOURCE_KEY_DELAY = "source_key_delay"
+CONF_SOURCE_ORDER = "source_order"
+CONF_SOURCE_NAME = "name"
 # Between-key gap in custom-source macros. Cold-start SOURCE wait/retry is separate.
 DEFAULT_SOURCE_KEY_DELAY = 0.1
 # Prior shipped defaults; migrate installs that never customized the gap.
@@ -109,6 +111,6 @@ REMOTE_CLIENT_ID = "HomeAssistant"
 
 DATA_CLIENT = "client"
 DATA_COORDINATOR = "coordinator"
-# Platform setup order matches TCL: media_player, remote, then Hisense buttons.
-PLATFORMS = ("media_player", "remote", "button")
+# TCL has media_player + remote only. Remoter keys are not button entities.
+PLATFORMS = ("media_player", "remote")
 ATTR_HIDDEN = "hidden"

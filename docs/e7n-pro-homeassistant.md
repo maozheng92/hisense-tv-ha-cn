@@ -32,13 +32,12 @@ E7N Pro（以及同代 E7N / E7NQ Pro）固件在 2024 之后通常还要：
 
 ## 集成做什么
 
-`custom_components/hisense_e7n`（1.23.0 起布局对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，应用走媒体浏览器）：
+`custom_components/hisense_e7n`（1.23.1 起布局对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，应用走媒体浏览器，选项流草稿/保存）：
 
 - `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台；安装的应用在 **媒体浏览器**（`browse_media` / `play_media`，类型 `app`），也保留 `hisense_e7n.launch_app`。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量只有 +/-（`VOLUME_STEP`），没有滑块
-- `remote`：发送 `KEY_*`（可用 Universal Remote Card）；关机状态下的电源键走同一套开机方式
-- `button`：爱家「电视」遥控页同款按键（电源、音量、截屏、信号源、AI识图、设置、方向键、OK、返回、首页、菜单），以及自定义输入源按钮。新实体默认隐藏；升级后也会把已有按钮标成 `hidden_by=integration`（不禁用），设备页「控制」里不再列出，仍可通过 `button.press` / 自动化 / 脚本调用。「切换遥控模式」和底部语音是手机 App 能力，不映射成电视键
-- 配置流：填 IP 即可。不需要蓝牙地址。若电视屏幕弹出 4 位数字，调用 `hisense_e7n.submit_code`
-- 选项：可添加「自定义输入源」——先起名，再点选遥控 button 组成切换组合（例如信号源 → 右 → OK），并可用上移/下移排序
+- `remote`：发送 `KEY_*`（可用 Universal Remote Card）；关机状态下的电源键走同一套开机方式。爱家遥控页上的键（电源、音量、截屏、信号源、AI识图、方向键等）**不会**建成 `button` 实体，仍可通过 `remote.send_command` / `hisense_e7n.send_key` / 自定义输入源宏调用。升级后会删掉旧版留下的 `button.*`。
+- 配置流：先填 IP（连接），再选开机方式，再可选音量加减实体。不需要蓝牙地址。若电视屏幕弹出 4 位数字，调用 `hisense_e7n.submit_code`
+- 选项（对齐 TCL）：草稿菜单「连接 / 开机 / 音量按钮 / 输入源 / 保存」。输入源可隐藏、单独设置间隔、用本集成按键或 HA `button.*` 组成序列（勾选 → 重复次数 → 可再加一组），并拖动排序
 - `iot_class: local_push`，不经过海信云
 
 ## 安装
@@ -87,13 +86,13 @@ data:
 
 爱家遥控页对应关系：
 
-| 爱家按钮 | HA 实体 / 命令 |
+| 爱家按钮 | HA 命令（无 button 实体） |
 |---|---|
-| 电源 | `button.…_power` → `KEY_POWER`（电视离线时改走这台电视的开机方式） |
+| 电源 | `remote.send_command` / `KEY_POWER`（电视离线时改走这台电视的开机方式） |
 | 音量 − / 静音 / 音量 + | `KEY_VOLUMEDOWN` / `KEY_MUTE` / `KEY_VOLUMEUP` |
-| 截屏 | `button.…_screenshot` → 电视上传当前画面，保存到媒体浏览器的 Image upload。同一台电视再次截屏会换掉上一张 |
-| 信号源 | `button.…_source` → 本机语音「信号源」，没有应答再发 `KEY_SOURCE` |
-| AI识图 | `button.…_smart_image` → 本机语音「识图」，没有应答再发 `functionSmartImage` |
+| 截屏 | `remote.send_command: screenshot` → 电视上传当前画面，保存到媒体浏览器的 Image upload。同一台电视再次截屏会换掉上一张 |
+| 信号源 | `KEY_SOURCE` → 本机语音「信号源」，没有应答再发 `KEY_SOURCE` |
+| AI识图 | `smart_image` → 本机语音「识图」，没有应答再发 `functionSmartImage` |
 | 设置 | `KEY_CONTROL_CENTER` |
 | 方向键 / OK | `KEY_UP` `KEY_DOWN` `KEY_LEFT` `KEY_RIGHT` `KEY_OK` |
 | 返回 / 首页 / 菜单 | `KEY_RETURNS` / `KEY_HOME` / `KEY_MENU` |
@@ -102,25 +101,26 @@ data:
 
 ## 自定义输入源
 
-电视未必会通过 MQTT 上报完整 HDMI/AV 列表。可在集成选项里用遥控 button 自由组合：
+电视未必会通过 MQTT 上报完整 HDMI/AV 列表。可在集成选项里用本集成按键和/或 HA 按钮实体自由组合（对齐 TCL）：
 
 1. **设置 → 设备与服务 → Hisense E7N Pro → 配置**
-2. 选 **自定义输入源**
-3. **添加输入源** → 先起名（例如 `HDMI1`）
-4. 再逐个点选遥控 button 加入组合，例如 **信号源 → 右 → OK**（同一个键可以加多次）
-5. 需要时选 **上移 / 下移**，并填写上移或下移几位
-6. 名称页可选 **返回** 回到列表；选 **完成** 后再 **保存并完成**
+2. 选 **输入源 → 添加输入源**
+3. 起名，可选「从输入源列表中隐藏」，并设置按键间隔（默认 **0.1** 秒）
+4. 选择 **本集成按键** 或 **按钮实体**，勾选顺序，再填每项重复次数；可继续添加另一组
+5. **调整顺序** 可拖动；改完后回到菜单点 **保存**
 
-「连接与开机」里的 **按键间隔** 控制组合键之间的等待（默认 **0.1** 秒，可改）。这与开机后等待信号源菜单就绪不是同一件事。组合里的「信号源」与遥控页信号源按钮相同，走本机语音 / 本地键，而不是只发 `KEY_SOURCE`。
+这与开机后等待信号源菜单就绪不是同一件事。组合里的「信号源」走本机语音 / 本地键，而不是只发 `KEY_SOURCE`。
 
 保存后：
 
-- `media_player` 的输入源列表最前面按你排好的顺序出现这些名称（不含应用）；选中时按顺序发键
-- 设备下会多出同名 `button`（顺序相同，默认隐藏，自动化里仍可用），按下同样跑整段组合
+- `media_player` 的输入源列表最前面按你排好的顺序出现未隐藏的名称（不含应用）；选中时按顺序发键
+- 隐藏的输入源仍可通过 `select_source` 调用，只是不出现在下拉列表
 - 开机后第一次切源会先等本机遥控口（7778/7779）就绪，并重试「信号源」，避免丢掉组合里的第一键
 - 已安装应用改到媒体浏览器里点选，或 `media_player.play_media`（`media_content_type: app`）。旧自动化里 `select_source` 填应用名仍然会打开该应用
 
-可选 button：信号源、方向键、OK、返回、首页、菜单、设置。修改选项后集成会重载，旧的自定义按钮若已改名会留在实体注册表里，可手动删除。
+## 静音状态
+
+VIDAA MQTT 会报静音：主题 `.../platform_service/data/volumechange`（以及 `actions/volumechange`）。载荷里的 `mute` / `mute_status`，或 `volume_type=2` 且 `volume_value` 为 0/1（sehaas），写入 `TvState.muted`，再接到 `media_player.is_volume_muted`。电视离线时该属性为 `None`。本机 HTTP（7778/7779）没有静音状态口；切换静音仍发 `KEY_MUTE`。
 
 ## 添加集成时报「无法连接 36669」
 

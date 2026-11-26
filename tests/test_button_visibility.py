@@ -1,9 +1,9 @@
-"""Existing button entities must be hidden without being disabled."""
+"""Older remoter button entities must be removed, not recreated."""
 
 from __future__ import annotations
 
 
-def test_should_hide_visible_buttons_only(proto_const) -> None:
+def test_should_remove_legacy_hisense_buttons_only(proto_const) -> None:
     from pathlib import Path
     import importlib.util
     import sys
@@ -21,29 +21,25 @@ def test_should_hide_visible_buttons_only(proto_const) -> None:
     module = importlib.util.module_from_spec(spec)
     module.__package__ = pkg
     sys.modules[full] = module
-    # const already loaded as proto_const under hisense_e7n_proto.const
     sys.modules[f"{pkg}.const"] = proto_const
     spec.loader.exec_module(module)
 
-    should_hide = module.should_hide_button_registry_entry
+    should_remove = module.should_remove_button_registry_entry
     domain = proto_const.DOMAIN
-    assert should_hide(domain="button", platform=domain, hidden_by=None) is True
-    assert should_hide(domain="button", platform=domain, hidden_by="integration") is False
-    assert should_hide(domain="button", platform=domain, hidden_by="user") is False
-    assert should_hide(domain="remote", platform=domain, hidden_by=None) is False
-    assert should_hide(domain="button", platform="other", hidden_by=None) is False
+    assert should_remove(domain="button", platform=domain) is True
+    assert should_remove(domain="remote", platform=domain) is False
+    assert should_remove(domain="button", platform="other") is False
 
 
-def test_button_module_writes_integration_hider() -> None:
+def test_no_button_platform_and_legacy_cleanup() -> None:
     from pathlib import Path
 
-    source = (
-        Path(__file__).resolve().parents[1]
-        / "custom_components"
-        / "hisense_e7n"
-        / "button.py"
-    ).read_text(encoding="utf-8")
-    assert "RegistryEntryHider.INTEGRATION" in source
-    assert "async_hide_existing_buttons" in source
-    assert "entity_registry_visible_default = False" in source
-    assert "disabled_by" not in source
+    root = Path(__file__).resolve().parents[1] / "custom_components" / "hisense_e7n"
+    init = (root / "__init__.py").read_text(encoding="utf-8")
+    button = (root / "button.py").read_text(encoding="utf-8")
+    assert "async_remove_legacy_button_entities" in init
+    const = (root / "const.py").read_text(encoding="utf-8")
+    assert 'PLATFORMS = ("media_player", "remote")' in const
+    assert "async_setup_entry" not in button
+    assert "ButtonEntity" not in button
+    assert "class " not in button

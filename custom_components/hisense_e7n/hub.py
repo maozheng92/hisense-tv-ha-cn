@@ -6,6 +6,7 @@ rows keep working. Platforms read ``entry.runtime_data``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -29,8 +30,13 @@ from .const import (
     POWER_ON_MODE_WOL,
 )
 from .custom_sources import (
+    KIND_KEY,
+    actions_to_wire_keys,
+    classify_source_action,
+    copy_sources,
     find_custom_source,
     normalize_custom_sources,
+    source_actions,
     source_key_delay,
     visible_source_names,
 )
@@ -179,7 +185,7 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
     ) -> None:
         """Store user-defined inputs and the pause between remoter keys."""
         try:
-            self.custom_sources = normalize_custom_sources(sources)
+            self.custom_sources = copy_sources(normalize_custom_sources(sources))
         except ValueError:
             _LOGGER.warning("Ignoring invalid custom sources", exc_info=True)
             self.custom_sources = []
@@ -193,12 +199,40 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
         self.source_key_delay = max(0.0, min(5.0, wait))
 
     async def async_press_source_buttons(self, source: str) -> None:
-        """Run a custom source KEY macro (TCL async_press_source_buttons)."""
+        """Run a custom source KEY / HA-button sequence (TCL layout)."""
         custom = find_custom_source(self.custom_sources, source)
         if custom is None:
             raise HomeAssistantError(f"Unknown custom source {source!r}")
+        actions = source_actions(custom)
+        if not actions:
+            raise HomeAssistantError(f"Custom source {source!r} has no presses")
         delay = source_key_delay(custom, self.source_key_delay)
-        await self.client.async_run_key_sequence(list(custom["keys"]), delay=delay)
+        kinds = {
+            classified[0]
+            for action in actions
+            if (classified := classify_source_action(action)) is not None
+        }
+        if kinds == {KIND_KEY}:
+            await self.client.async_run_key_sequence(
+                actions_to_wire_keys(actions), delay=delay
+            )
+        else:
+            for step, action in enumerate(actions):
+                classified = classify_source_action(action)
+                if classified is None:
+                    raise HomeAssistantError(f"Unknown source action {action!r}")
+                kind, value = classified
+                if kind == KIND_KEY:
+                    await self.async_send_key(value)
+                else:
+                    await self.hass.services.async_call(
+                        "button",
+                        "press",
+                        {ATTR_ENTITY_ID: value},
+                        blocking=True,
+                    )
+                if step < len(actions) - 1 and delay > 0:
+                    await asyncio.sleep(delay)
         self.selected_source = str(custom["name"])
         self.async_set_updated_data(self.client.state)
 
