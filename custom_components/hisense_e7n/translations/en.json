@@ -3,19 +3,10 @@
     "step": {
       "user": {
         "title": "Hisense E7N Pro",
-        "description": "The TV must be on. Keys use the TV's own MQTT on port 36669. You do not need a Bluetooth MAC — 爱家 only asks for Bluetooth while adding appliances. Wi-Fi MAC is only for Wake-on-LAN.",
+        "description": "The TV must be on. Keys use the TV's own MQTT on port 36669. You do not need a Bluetooth MAC. Wi-Fi MAC is only for Wake-on-LAN.",
         "data": {
           "host": "TV IP address",
           "port": "MQTT port",
-          "power_on_mode": "Power on with",
-          "power_on_button": "Power-on button",
-          "power_on_remote": "Infrared remote",
-          "power_on_command": "IR command",
-          "power_on_device": "IR device name",
-          "volume_up_button": "音量加按钮",
-          "volume_down_button": "音量减按钮",
-          "音量加按钮": "音量加按钮",
-          "音量减按钮": "音量减按钮",
           "mac": "TV Wi-Fi MAC",
           "name": "Name",
           "auth_mode": "Auth mode",
@@ -24,27 +15,52 @@
         },
         "data_description": {
           "host": "IPv4 of the E7N Pro. Give it a DHCP reservation.",
-          "power_on_mode": "Each TV has its own wake method. Button presses a button, switch, or script. Infrared remote calls remote.send_command. Wake-on-LAN uses the Wi-Fi MAC. 爱家 cannot power the TV on.",
-          "power_on_button": "Used when power on is Button. button.press, or switch/script turn_on.",
-          "power_on_remote": "A remote entity (Broadlink, ESPHome, Harmony). Used when power on is Infrared remote.",
-          "power_on_command": "Command name stored on that remote, for example power or TV_POWER. Sent as remote.send_command.",
-          "power_on_device": "Optional device name, only for remotes that need it (Harmony).",
-          "volume_up_button": "可选。填写后，媒体播放器音量加会按下这个按钮/开关/脚本，不再发电视 LAN 键。",
-          "volume_down_button": "可选。填写后，媒体播放器音量减会按下这个按钮/开关/脚本，不再发电视 LAN 键。",
-          "音量加按钮": "可选。填写后，媒体播放器音量加会按下这个按钮/开关/脚本，不再发电视 LAN 键。",
-          "音量减按钮": "可选。填写后，媒体播放器音量减会按下这个按钮/开关/脚本，不再发电视 LAN 键。",
           "mac": "Optional. Wi-Fi MAC for Wake-on-LAN only. It is not the remote identity, and it is not a Bluetooth address.",
           "auth_mode": "auto tries modern VIDAA credentials first, then legacy static login.",
           "client_cert": "Leave empty to use a generated stand-in cert. If MQTT rc=5, extract the VIDAA/爱家 client cert (see docs)."
+        }
+      },
+      "power_on": {
+        "title": "Power on",
+        "description": "爱家 cannot start a fully off TV. Pick this set's wake method.",
+        "data": {
+          "power_on_mode": "Power on with",
+          "power_on_button": "Power-on button",
+          "power_on_remote": "Infrared remote",
+          "power_on_command": "IR command",
+          "power_on_device": "IR device name"
+        },
+        "data_description": {
+          "power_on_mode": "Button presses a button, switch, or script. Infrared remote calls remote.send_command. Wake-on-LAN uses the Wi-Fi MAC.",
+          "power_on_button": "Used when power on is Button.",
+          "power_on_remote": "A remote entity (Broadlink, ESPHome, Harmony).",
+          "power_on_command": "Command name stored on that remote, for example power.",
+          "power_on_device": "Optional device name, only for remotes that need it (Harmony)."
+        }
+      },
+      "volume": {
+        "title": "Volume buttons",
+        "description": "Optional Home Assistant entities that replace LAN KEY_VOLUME* for media_player volume +/-.",
+        "data": {
+          "volume_up_button": "音量加按钮",
+          "volume_down_button": "音量减按钮",
+          "音量加按钮": "音量加按钮",
+          "音量减按钮": "音量减按钮"
+        },
+        "data_description": {
+          "volume_up_button": "Optional. Volume up presses this button/switch/script instead of the TV LAN key.",
+          "volume_down_button": "Optional. Volume down presses this button/switch/script instead of the TV LAN key.",
+          "音量加按钮": "可选。填写后，媒体播放器音量加会按下这个按钮/开关/脚本，不再发电视 LAN 键。",
+          "音量减按钮": "可选。填写后，媒体播放器音量减会按下这个按钮/开关/脚本，不再发电视 LAN 键。"
         }
       }
     },
     "error": {
       "cannot_connect": "Could not reach the TV MQTT port (default 36669). Confirm the TV is fully on (not standby), the IP is the TV's LAN address, Home Assistant is on the same network, and phone remote / network control is enabled.",
       "timeout": "The TV accepted TCP on 36669 but did not complete MQTT. Wait until the TV has finished booting, then try again.",
-      "tls_failed": "Reached port 36669 but the TLS handshake failed. The integration now uses legacy ciphers and the 爱家 client certificate automatically — retry after a TV reboot. If it still fails, the TV may be serving plain MQTT; keep auth mode on auto.",
-      "not_authorized": "MQTT connected but the TV rejected the login (rc=5). Keep auth mode on auto, set the TV clock/timezone correctly, and retry. Newer VIDAA firmware needs dynamic credentials; older firmware uses hisenseservice.",
-      "cannot_connect_ble": "Could not pair over Bluetooth. Enable Bluetooth on the Home Assistant machine (爱家 shows the same prompt) and confirm the TV BLE address.",
+      "tls_failed": "Reached port 36669 but the TLS handshake failed. Retry after a TV reboot. If it still fails, keep auth mode on auto.",
+      "not_authorized": "MQTT connected but the TV rejected the login (rc=5). Keep auth mode on auto, set the TV clock/timezone correctly, and retry.",
+      "cannot_connect_ble": "Could not pair over Bluetooth.",
       "power_on_required": "This power-on method needs the matching entity, IR command, or Wi-Fi MAC.",
       "volume_button_invalid": "Pick a button, switch, or script entity."
     },
@@ -57,83 +73,205 @@
     "step": {
       "init": {
         "title": "Hisense E7N Pro options",
+        "description": "Power-on: {power_on}\nVolume +/-: {volume_up} / {volume_down}\nInput sources: {source_count}. Changes apply only after Save.",
         "menu_options": {
-          "basic": "Connection and power on",
-          "custom_sources": "Custom inputs"
+          "connection": "Connection",
+          "power_on": "Power on",
+          "volume": "Volume buttons",
+          "sources": "Input sources",
+          "save": "Save"
         }
       },
-      "basic": {
-        "title": "Connection and power on",
+      "connection": {
+        "title": "Connection",
+        "description": "Host {host}. Pause between keys is the default for sources that do not set their own interval.",
         "data": {
           "host": "TV IP address",
           "port": "MQTT port",
+          "mac": "TV Wi-Fi MAC",
+          "name": "Name",
+          "source_key_delay": "Default pause between presses"
+        },
+        "data_description": {
+          "mac": "Wi-Fi MAC for Wake-on-LAN. Required when power-on is Wake-on-LAN.",
+          "source_key_delay": "Default seconds to wait after each press except the last. Each source can override this."
+        },
+        "submit": "Submit"
+      },
+      "power_on": {
+        "title": "Power on",
+        "description": "Pick a wake method. For infrared, choose the remote here, then the learned command.",
+        "data": {
           "power_on_mode": "Power on with",
           "power_on_button": "Power-on button",
-          "power_on_remote": "Infrared remote",
-          "power_on_command": "IR command",
-          "power_on_device": "IR device name",
+          "power_on_remote": "Infrared remote"
+        },
+        "data_description": {
+          "power_on_remote": "A Home Assistant remote entity that has learned IR codes."
+        },
+        "submit": "Submit"
+      },
+      "ir_details": {
+        "title": "Power-on IR command",
+        "description": "Choose the learned device and command for {remote_entity} (codes file: {codes_file}).",
+        "data": {
+          "power_on_device": "Device",
+          "power_on_command": "Command"
+        },
+        "data_description": {
+          "power_on_device": "Device name from the remote's learned codes. Required for Harmony Hub and Xiaomi Home.",
+          "power_on_command": "Command name from that device (for example Power or power_on)."
+        },
+        "submit": "Submit"
+      },
+      "volume": {
+        "title": "Volume buttons",
+        "description": "Optional entities that replace LAN KEY_VOLUME* for media_player +/-.",
+        "data": {
           "volume_up_button": "音量加按钮",
           "volume_down_button": "音量减按钮",
           "音量加按钮": "音量加按钮",
-          "音量减按钮": "音量减按钮",
-          "mac": "TV Wi-Fi MAC",
-          "name": "Name",
-          "source_key_delay": "Pause between keys (seconds)"
+          "音量减按钮": "音量减按钮"
         },
         "data_description": {
-          "power_on_mode": "Button, infrared remote, or Wake-on-LAN. This setting is stored per TV.",
-          "power_on_button": "Entity pressed when the mode is Button.",
-          "power_on_remote": "remote entity used when the mode is Infrared remote.",
-          "power_on_command": "IR command name, for example power.",
-          "power_on_device": "Optional Harmony device name.",
-          "volume_up_button": "可选。音量加会按下这个实体，不再发电视 LAN 键。",
-          "volume_down_button": "可选。音量减会按下这个实体，不再发电视 LAN 键。",
           "音量加按钮": "可选。音量加会按下这个实体，不再发电视 LAN 键。",
-          "音量减按钮": "可选。音量减会按下这个实体，不再发电视 LAN 键。",
-          "mac": "Wi-Fi MAC for Wake-on-LAN. Required when the mode is Wake-on-LAN.",
-          "source_key_delay": "Wait this long between remoter keys in a custom input sequence. Default 0.1. Separate from the cold-start wait that opens Source."
+          "音量减按钮": "可选。音量减会按下这个实体，不再发电视 LAN 键。"
+        },
+        "submit": "Submit"
+      },
+      "sources": {
+        "title": "Input sources",
+        "description": "Named HDMI/AV inputs with a press sequence (this TV's keys and/or button entities, for example Source → Right → OK). Hidden sources stay in this list but not on the media player. Current: {source_names}",
+        "menu_options": {
+          "source_add": "Add source",
+          "source_edit": "Edit source",
+          "source_delete": "Delete source",
+          "source_reorder": "Reorder sources",
+          "save": "Save",
+          "sources_done": "Back"
         }
       },
-      "custom_sources": {
-        "title": "Custom inputs",
-        "description": "Current inputs (media player and buttons use this order):\n{sources}\n\nAdd a name first, then pick remoter buttons in order (source → right → ok). Use 上移 / 下移 with a step count to reorder.",
+      "source_add": {
+        "title": "Add input source",
+        "description": "Name the input first. Next you choose this TV's keys or button entities, then how many times to press each one.",
         "data": {
-          "manage_action": "Action",
-          "manage_source": "Input",
-          "move_steps": "Move by (positions)"
+          "name": "Name",
+          "hidden": "Hide from source list",
+          "interval": "Pause between presses"
         },
         "data_description": {
-          "manage_action": "Add, edit, remove, reorder, or finish and save.",
-          "manage_source": "Required when editing, removing, or reordering.",
-          "move_steps": "How many positions to move up or down. Ignored for other actions."
+          "name": "Shown on media_player.select_source (for example HDMI 1).",
+          "hidden": "Keep the source configured but omit it from the TV source list.",
+          "interval": "Seconds to wait after each press except the last."
+        },
+        "submit": "Submit"
+      },
+      "source_edit": {
+        "title": "Edit input source",
+        "description": "Pick the source to change.",
+        "data": {
+          "name": "Source"
+        },
+        "submit": "Submit"
+      },
+      "source_form": {
+        "title": "Edit input source",
+        "description": "Current sequence: {sequence}",
+        "data": {
+          "name": "Name",
+          "hidden": "Hide from source list",
+          "interval": "Pause between presses",
+          "edit_sequence": "Replace press sequence"
+        },
+        "data_description": {
+          "name": "Shown on media_player.select_source (for example HDMI 1).",
+          "hidden": "Keep the source configured but omit it from the TV source list.",
+          "interval": "Seconds to wait after each press except the last.",
+          "edit_sequence": "Turn on to pick TV keys or button entities again and set how many times each is pressed."
+        },
+        "submit": "Submit"
+      },
+      "source_seq_kind": {
+        "title": "Press sequence type",
+        "description": "Current sequence: {sequence}\nChoose this TV's keys or Home Assistant button entities. You can add the other kind afterwards.",
+        "menu_options": {
+          "source_seq_keys": "This TV's keys",
+          "source_seq_buttons": "Button entities",
+          "source_seq_kind_back": "Back"
         }
       },
-      "source_name": {
-        "title": "Input name",
-        "description": "Name this input (for example HDMI1). Choose 下一步 to pick remoter buttons, or 返回 to go back to the list.",
+      "source_seq_pick": {
+        "title": "Choose presses",
+        "description": "Using {kind}. Current sequence: {sequence}\nPick items in the order they should be sent. Next you will set how many times each one is pressed.",
         "data": {
-          "custom_source_name": "Name",
-          "source_name_action": "Action"
-        }
+          "actions": "Items"
+        },
+        "data_description": {
+          "actions": "Drag to reorder. Each item is listed once; repeats are set on the next screen."
+        },
+        "submit": "Submit"
       },
-      "source_buttons": {
-        "title": "Pick remoter buttons",
-        "description": "Input: {source_name}\nSequence: {sequence}\n\nChoose a remoter button, then Add. Repeat (the same button can be added more than once). Choose Done when the sequence is complete.",
+      "source_seq_repeat": {
+        "title": "How many times",
+        "description": "Sequence so far: {sequence}\n{repeat_help}",
         "data": {
-          "sequence_button": "Remoter button",
-          "sequence_action": "Action"
-        }
+          "repeat_0": "{item_0}",
+          "repeat_1": "{item_1}",
+          "repeat_2": "{item_2}",
+          "repeat_3": "{item_3}",
+          "repeat_4": "{item_4}",
+          "repeat_5": "{item_5}",
+          "repeat_6": "{item_6}",
+          "repeat_7": "{item_7}",
+          "repeat_8": "{item_8}",
+          "repeat_9": "{item_9}",
+          "repeat_10": "{item_10}",
+          "repeat_11": "{item_11}",
+          "repeat_12": "{item_12}",
+          "repeat_13": "{item_13}",
+          "repeat_14": "{item_14}",
+          "repeat_15": "{item_15}",
+          "repeat_16": "{item_16}",
+          "repeat_17": "{item_17}",
+          "repeat_18": "{item_18}",
+          "repeat_19": "{item_19}",
+          "add_more": "Add another group"
+        },
+        "data_description": {
+          "add_more": "Turn on to append more TV keys or button entities after these."
+        },
+        "submit": "Submit"
+      },
+      "source_delete": {
+        "title": "Delete input source",
+        "description": "Remove a source from the list. This cannot be undone after Save.",
+        "data": {
+          "name": "Source"
+        },
+        "submit": "Submit"
+      },
+      "source_reorder": {
+        "title": "Reorder input sources",
+        "description": "All input sources are listed. Drag to change the order shown on the media player. Keep every source in the list.",
+        "data": {
+          "source_order": "Order"
+        },
+        "submit": "Submit"
       }
     },
     "error": {
-      "cannot_connect_ble": "Invalid or unreachable TV Bluetooth address. Enable Bluetooth on the Home Assistant host and retry.",
+      "buttons_required": "Select at least one TV key or button entity.",
+      "pick_required": "Select at least one item of this type.",
+      "unknown_action": "That press sequence has an unknown key or button.",
+      "command_required": "Select or enter the IR command name.",
+      "device_required": "This remote requires a device name.",
+      "name_in_use": "That source name is already used.",
+      "name_required": "Enter a source name.",
+      "host_required": "Enter the TV IP address.",
+      "remote_required": "Select an IR remote.",
+      "unknown_source": "That source is not in the list.",
       "power_on_required": "This power-on method needs the matching entity, IR command, or Wi-Fi MAC.",
-      "volume_button_invalid": "Pick a button, switch, or script entity.",
-      "source_required": "Pick which input to edit, remove, or reorder.",
-      "source_name_required": "Enter a name for this input.",
-      "source_name_duplicate": "That input name is already used.",
-      "sequence_button_required": "Pick a remoter button to add.",
-      "sequence_empty": "Add at least one remoter button before finishing."
+      "volume_button_invalid": "Pick a button, switch, or script entity."
     }
   },
   "entity": {
@@ -141,29 +279,15 @@
       "tv": {
         "name": "TV"
       }
-    },
-    "remote": {
-      "remote": {
-        "name": "Remote"
+    }
+  },
+  "selector": {
+    "power_on_mode": {
+      "options": {
+        "button": "Button, switch, or script",
+        "remote": "Infrared remote",
+        "wol": "Wake-on-LAN"
       }
-    },
-    "button": {
-      "power": {"name": "Power"},
-      "volume_down": {"name": "Volume down"},
-      "mute": {"name": "Mute"},
-      "volume_up": {"name": "Volume up"},
-      "screenshot": {"name": "Screenshot"},
-      "source": {"name": "Source"},
-      "smart_image": {"name": "AI image"},
-      "settings": {"name": "Settings"},
-      "up": {"name": "Up"},
-      "left": {"name": "Left"},
-      "ok": {"name": "OK"},
-      "right": {"name": "Right"},
-      "down": {"name": "Down"},
-      "back": {"name": "Back"},
-      "home": {"name": "Home"},
-      "menu": {"name": "Menu"}
     }
   },
   "services": {
@@ -189,53 +313,6 @@
           "name": "App URL / id",
           "description": "Optional store url such as netflix."
         }
-      }
-    }
-  },
-  "selector": {
-    "power_on_mode": {
-      "options": {
-        "button": "Button, switch, or script",
-        "remote": "Infrared remote",
-        "wol": "Wake-on-LAN"
-      }
-    },
-    "manage_action": {
-      "options": {
-        "add": "添加输入源",
-        "edit": "编辑输入源",
-        "remove": "删除输入源",
-        "move_up": "上移",
-        "move_down": "下移",
-        "finish": "保存并完成"
-      }
-    },
-    "source_name_action": {
-      "options": {
-        "next": "下一步",
-        "back": "返回"
-      }
-    },
-    "sequence_action": {
-      "options": {
-        "add": "Add button to sequence",
-        "undo": "Remove last button",
-        "clear": "Clear sequence",
-        "done": "Done"
-      }
-    },
-    "sequence_button": {
-      "options": {
-        "KEY_SOURCE": "Source",
-        "KEY_UP": "Up",
-        "KEY_DOWN": "Down",
-        "KEY_LEFT": "Left",
-        "KEY_RIGHT": "Right",
-        "KEY_OK": "OK",
-        "KEY_RETURNS": "Back",
-        "KEY_HOME": "Home",
-        "KEY_MENU": "Menu",
-        "KEY_CONTROL_CENTER": "Settings"
       }
     }
   }

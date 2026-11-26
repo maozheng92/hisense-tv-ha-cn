@@ -242,6 +242,10 @@ class HisenseTvClient:
     def creds(self) -> MqttCredentials | None:
         return self._creds
 
+    @property
+    def mqtt_connected(self) -> bool:
+        return self._creds is not None and self._client is not None
+
     def add_listener(self, callback: Callable[[TvState], None]) -> None:
         self._listeners.append(callback)
 
@@ -513,7 +517,7 @@ class HisenseTvClient:
 
     def _publish(self, topic: str, payload: Any, *, wait: bool = False) -> None:
         if self._client is None:
-            raise RuntimeError("MQTT client is not connected")
+            raise ConnectionError("MQTT client is not connected")
         if payload is None:
             body: str | bytes = ""
         elif isinstance(payload, (dict, list)):
@@ -713,8 +717,8 @@ class HisenseTvClient:
         self.state.available = False
 
     def _require_creds(self) -> MqttCredentials:
-        if self._creds is None:
-            raise RuntimeError("Not connected")
+        if self._creds is None or self._client is None:
+            raise ConnectionError("Not connected")
         return self._creds
 
     def _publish_action(
@@ -767,6 +771,15 @@ class HisenseTvClient:
         if status is not None and 200 <= status < 300:
             self._note_remoter_ok()
             return
+        if not self.mqtt_connected:
+            _LOGGER.info(
+                "HTTP remote did not take %s (status %s); MQTT not connected",
+                name,
+                status,
+            )
+            raise ConnectionError(
+                f"TV remoter did not take {name} and MQTT is not connected"
+            )
         _LOGGER.info("HTTP remote did not take %s (status %s); trying MQTT", name, status)
         self._publish_action("remote_service", "sendkey", key, as_key=True)
 
@@ -850,6 +863,14 @@ class HisenseTvClient:
             last_status = status if status is not None else last_status
             if attempt + 1 < attempts:
                 pause(max(0.0, float(retry_delay)))
+        if not self.mqtt_connected:
+            _LOGGER.info(
+                "Local source command was not accepted (%s); MQTT not connected",
+                last_status,
+            )
+            raise ConnectionError(
+                "Could not open the source menu (LAN remoter missed and MQTT is not connected)"
+            )
         _LOGGER.info(
             "Local source command was not accepted (%s); trying MQTT", last_status
         )

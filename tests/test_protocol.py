@@ -5,6 +5,11 @@ from __future__ import annotations
 import time
 
 
+def test_platforms_match_tcl_no_button_entities(proto_const) -> None:
+    assert proto_const.PLATFORMS == ("media_player", "remote")
+    assert proto_const.ATTR_HIDDEN == "hidden"
+
+
 def test_key_aliases_match_aijia(proto_keys) -> None:
     assert proto_keys.normalize_key("power") == proto_keys.KEY_POWER
     assert proto_keys.normalize_key("KEY_HOME") == proto_keys.KEY_HOME
@@ -13,6 +18,8 @@ def test_key_aliases_match_aijia(proto_keys) -> None:
     assert proto_keys.normalize_key("returns") == "KEY_RETURNS"
     assert proto_keys.normalize_key("settings") == proto_keys.KEY_CONTROL_CENTER
     assert proto_keys.normalize_key("screenshot") == "screenshot"
+    assert proto_keys.normalize_key("截屏") == "screenshot"
+    assert proto_keys.normalize_key("capture") == "screenshot"
 
 
 def test_aijia_remoter_has_screenshot_keys(proto_keys) -> None:
@@ -76,6 +83,8 @@ def test_pair_topic_and_subscriptions_are_concrete(proto_client, proto_credentia
     assert not any(item.endswith("#") or "/+" in item for item in subs)
     assert "/remoteapp/mobile/broadcast/ui_service/state" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep" in subs
+    assert "/remoteapp/mobile/broadcast/platform_service/data/volumechange" in subs
+    assert "/remoteapp/mobile/broadcast/platform_service/actions/volumechange" in subs
 
 
 def test_volume_and_source_parsing(proto_client) -> None:
@@ -83,6 +92,8 @@ def test_volume_and_source_parsing(proto_client) -> None:
     client._apply_volume({"volume_value": 24, "mute": 1})
     assert client.state.volume == 24
     assert client.state.muted is True
+    client._apply_volume({"volume_value": 24, "mute_status": 0})
+    assert client.state.muted is False
     client._apply_volume("40")
     assert client.state.volume == 40
     client._apply_sources(
@@ -198,6 +209,21 @@ def test_volume_type_2_is_mute(proto_client) -> None:
     client._apply_volume({"volume_type": 1, "volume_value": 18})
     assert client.state.volume == 18
     assert client.state.volume_type == 1
+
+
+def test_volumechange_mqtt_sets_mute_status(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client._handle_message(
+        "/remoteapp/mobile/broadcast/platform_service/data/volumechange",
+        b'{"volume_value": 16, "mute_status": 1}',
+    )
+    assert client.state.volume == 16
+    assert client.state.muted is True
+    client._handle_message(
+        "/remoteapp/mobile/broadcast/platform_service/actions/volumechange",
+        b'{"volume_value": 16, "mute": 0}',
+    )
+    assert client.state.muted is False
 
 
 def test_pairing_request_is_only_vidaa_app_connect(proto_client, proto_credentials) -> None:

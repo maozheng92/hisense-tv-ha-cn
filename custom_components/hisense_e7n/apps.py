@@ -62,6 +62,51 @@ def format_app_title(app: dict[str, Any]) -> str:
     return name
 
 
+def app_media_id(app: dict[str, Any]) -> str:
+    """Stable play_media / browse_media id (package, then url, then name)."""
+    for key in ("package", "app_id", "url", "name"):
+        value = str(app.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def resolve_app(apps: list[dict[str, Any]], media_id: str) -> dict[str, Any] | None:
+    """Match play_media id: exact package/url/id/name, then unique substring.
+
+    Same matching order as TCL ``resolve_app_package``, over VIDAA app dicts.
+    """
+    wanted = media_id.strip() if isinstance(media_id, str) else ""
+    if not wanted:
+        return None
+    for app in apps:
+        ids = {
+            str(app.get("package") or "").strip(),
+            str(app.get("app_id") or "").strip(),
+            str(app.get("url") or "").strip(),
+            str(app.get("name") or "").strip(),
+            format_app_title(app).strip(),
+        }
+        if wanted in ids:
+            return app
+    lowered = wanted.casefold()
+    for app in apps:
+        name = str(app.get("name") or "").strip()
+        title = format_app_title(app)
+        if name.casefold() == lowered or title.casefold() == lowered:
+            return app
+    matches = [
+        app
+        for app in apps
+        if lowered in " ".join(
+            str(app.get(key) or "") for key in ("name", "package", "app_id", "url")
+        ).casefold()
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
 def _items(data: Any) -> list[Any]:
     if isinstance(data, list):
         return data

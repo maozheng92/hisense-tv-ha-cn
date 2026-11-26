@@ -15,9 +15,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 import voluptuous as vol
 
-from .const import DATA_COORDINATOR, DOMAIN
-from .coordinator import HisenseTvCoordinator
-from .entity import HisenseTvEntity
+try:
+    from homeassistant.components.remote import ATTR_DELAY_SECS
+except ImportError:  # pragma: no cover
+    ATTR_DELAY_SECS = "delay_secs"
+
+from .entity import HisenseTvEntity, tv_errors
+from .hub import HisenseTvHub, hub_from_entry
 from .keys import KEY_POWER, aijia_send_commands, normalize_key
 
 
@@ -26,8 +30,8 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: HisenseTvCoordinator = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
-    async_add_entities([HisenseTvRemote(coordinator, entry)])
+    hub = hub_from_entry(hass, entry)
+    async_add_entities([HisenseTvRemote(hub, entry)])
     platform = entity_platform.async_get_current_platform()
     platform.async_register_entity_service(
         "send_key",
@@ -42,35 +46,40 @@ async def async_setup_entry(
 
 
 class HisenseTvRemote(HisenseTvEntity, RemoteEntity):
-    """Send individual remote keys (works with Universal Remote Card)."""
+    """Send individual remote keys (works with Universal Remote Card).
 
-    _attr_name = "Remote"
-    _attr_icon = "mdi:remote"
-    _attr_translation_key = "remote"
+    Matches tcl_tv: unnamed entity so HA uses the device name and the
+    remote platform default icon.
+    """
 
-    def __init__(self, coordinator: HisenseTvCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator, entry)
+    _attr_name = None
+
+    def __init__(self, hub: HisenseTvHub, entry: ConfigEntry) -> None:
+        super().__init__(hub, entry)
         self._attr_unique_id = f"{entry.entry_id}_remote"
 
     @property
     def is_on(self) -> bool:
-        return (self.coordinator.data or self.coordinator.client.state).available
+        return self.hub.tv.available
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_turn_on()
+        await self.hub.async_turn_on()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.client.async_turn_off()
+        with tv_errors():
+            await self.hub.client.async_turn_off()
 
     async def async_send_key_service(self, key: str) -> None:
-        await self.coordinator.async_send_key(normalize_key(key))
+        with tv_errors():
+            await self.hub.async_send_key(normalize_key(key))
 
     async def async_submit_code(self, code: str) -> None:
-        await self.coordinator.client.async_submit_code(code)
+        with tv_errors():
+            await self.hub.client.async_submit_code(code)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        ble = self.coordinator.client.ble
+        ble = self.hub.client.ble
         return {
             "commands": aijia_send_commands(),
             "ble_connected": bool(ble is not None and getattr(ble, "connected", False)),
@@ -78,13 +87,14 @@ class HisenseTvRemote(HisenseTvEntity, RemoteEntity):
 
     async def async_send_command(self, command: Iterable[str], **kwargs: Any) -> None:
         repeats = int(kwargs.get("num_repeats") or 1)
-        delay = float(kwargs.get("delay_secs") or 0.12)
+        delay = float(kwargs.get(ATTR_DELAY_SECS) or kwargs.get("delay_secs") or 0.12)
         for raw in command:
             key = normalize_key(str(raw))
             for _ in range(max(1, repeats)):
-                if key == KEY_POWER and not self.coordinator.client.state.available:
-                    await self.coordinator.async_turn_on()
-                else:
-                    await self.coordinator.async_send_key(key)
+                with tv_errors():
+                    if key == KEY_POWER and not self.hub.client.state.available:
+                        await self.hub.async_turn_on()
+                    else:
+                        await self.hub.async_send_key(key)
                 if delay:
                     await asyncio.sleep(delay)

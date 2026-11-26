@@ -1,9 +1,13 @@
-"""Shared entity helpers."""
+"""Shared entity helpers (TCL TclTvEntity + tv_errors)."""
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_MAC, CONF_NAME
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -13,16 +17,32 @@ except ImportError:  # pragma: no cover - HA < 2022.8
     CONNECTION_BLUETOOTH = "bluetooth"
 
 from .const import CONF_BLE_ADDRESS, CONF_CLIENT_UUID, DEFAULT_NAME, DOMAIN
-from .coordinator import HisenseTvCoordinator
+from .hub import HisenseTvHub
 
 
-class HisenseTvEntity(CoordinatorEntity[HisenseTvCoordinator]):
+@contextmanager
+def tv_errors() -> Iterator[None]:
+    """Turn protocol ConnectionError into HomeAssistantError (TCL tv_errors)."""
+    try:
+        yield
+    except HomeAssistantError:
+        raise
+    except ConnectionError as err:
+        raise HomeAssistantError(str(err)) from err
+    except OSError as err:
+        raise HomeAssistantError(str(err)) from err
+    except RuntimeError as err:
+        raise HomeAssistantError(str(err)) from err
+
+
+class HisenseTvEntity(CoordinatorEntity[HisenseTvHub]):
     """Base entity bound to one E7N Pro."""
 
     _attr_has_entity_name = True
+    _attr_should_poll = False
 
-    def __init__(self, coordinator: HisenseTvCoordinator, entry: ConfigEntry) -> None:
-        super().__init__(coordinator)
+    def __init__(self, hub: HisenseTvHub, entry: ConfigEntry) -> None:
+        super().__init__(hub)
         self._entry = entry
         uuid = entry.data.get(CONF_CLIENT_UUID, entry.entry_id)
         host = entry.data.get(CONF_HOST, "")
@@ -40,7 +60,11 @@ class HisenseTvEntity(CoordinatorEntity[HisenseTvCoordinator]):
         )
 
     @property
+    def hub(self) -> HisenseTvHub:
+        return self.coordinator
+
+    @property
     def available(self) -> bool:
-        if self.coordinator.client.state.available:
+        if self.hub.client.state.available:
             return True
-        return self.coordinator.can_power_on
+        return self.hub.can_power_on

@@ -40,10 +40,24 @@ def _convert_to_jpeg(image: bytes) -> bytes:
     return payload
 
 
+def image_upload_file_field(factory, name, filename, file, content_type, headers):
+    """Build aiohttp FileField; HA/aiohttp versions differ on kwargs vs positional."""
+    try:
+        return factory(
+            name=name,
+            filename=filename,
+            file=file,
+            content_type=content_type,
+            headers=headers,
+        )
+    except TypeError:
+        return factory(name, filename, file, content_type, headers)
+
+
 def _file_field(name: str, filename: str, file: BytesIO, content_type: str, headers: dict):
     from aiohttp.web_request import FileField
 
-    return FileField(name, filename, file, content_type, headers)
+    return image_upload_file_field(FileField, name, filename, file, content_type, headers)
 
 
 def _record_path(hass: Any, entry_id: str) -> Path:
@@ -66,6 +80,28 @@ def _write_media_id(path: Path, media_id: str) -> None:
     path.write_text(json.dumps({"id": media_id}), encoding="utf-8")
 
 
+async def async_image_upload_collection(hass: Any) -> Any:
+    """Return Image upload storage, setting the component up if needed (TCL)."""
+    collection = hass.data.get(IMAGE_UPLOAD_DOMAIN)
+    if collection is not None:
+        return collection
+    try:
+        from homeassistant.setup import async_setup_component
+    except ImportError:
+        collection = None
+    else:
+        try:
+            if await async_setup_component(hass, IMAGE_UPLOAD_DOMAIN, {}):
+                collection = hass.data.get(IMAGE_UPLOAD_DOMAIN)
+        except Exception:  # noqa: BLE001
+            collection = None
+    if collection is None:
+        raise RuntimeError(
+            "Home Assistant 没有启用 Image 媒体源。请保留 default_config，或在配置里加上 image_upload。"
+        )
+    return collection
+
+
 async def async_save_screenshot(
     hass: Any,
     entry_id: str,
@@ -77,11 +113,7 @@ async def async_save_screenshot(
     The previous screenshot for this config entry is removed, so the Image
     source keeps the latest frame.
     """
-    collection = hass.data.get(IMAGE_UPLOAD_DOMAIN)
-    if collection is None:
-        raise RuntimeError(
-            "Home Assistant 没有启用 Image 媒体源。请保留 default_config，或在配置里加上 image_upload。"
-        )
+    collection = await async_image_upload_collection(hass)
     payload, content_type = image_for_upload(image)
     record = _record_path(hass, entry_id)
     previous = await hass.async_add_executor_job(_read_media_id, record)

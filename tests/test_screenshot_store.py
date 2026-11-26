@@ -105,6 +105,29 @@ def test_image_upload_keeps_only_the_latest_frame(tmp_path, monkeypatch) -> None
     assert record == {"id": "img2"}
 
 
+def test_file_field_falls_back_when_kwargs_are_rejected() -> None:
+    store = load_proto("screenshot_store")
+
+    class _KwargsOk:
+        def __call__(self, *args, **kwargs):
+            return kwargs
+
+    class _PositionalOnly:
+        def __call__(self, *args, **kwargs):
+            if kwargs:
+                raise TypeError("positional only")
+            return args
+
+    named = store.image_upload_file_field(
+        _KwargsOk(), "file", "shot.jpg", object(), "image/jpeg", {}
+    )
+    assert named["filename"] == "shot.jpg"
+    positional = store.image_upload_file_field(
+        _PositionalOnly(), "file", "shot.jpg", object(), "image/jpeg", {}
+    )
+    assert positional[1] == "shot.jpg"
+
+
 def test_missing_image_source_is_reported(tmp_path) -> None:
     store = load_proto("screenshot_store")
     hass = _Hass(tmp_path, None)

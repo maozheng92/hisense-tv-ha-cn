@@ -100,6 +100,55 @@ def test_move_custom_source_reorders_list(proto_custom_sources) -> None:
     assert [item["name"] for item in clamped] == ["AV", "HDMI1", "HDMI2"]
 
 
+def test_classify_source_action_keys_and_ha_buttons(proto_custom_sources) -> None:
+    classify = proto_custom_sources.classify_source_action
+    assert classify("source") == ("key", "KEY_SOURCE")
+    assert classify("KEY_RIGHT") == ("key", "KEY_RIGHT")
+    assert classify("ok") == ("key", "KEY_OK")
+    assert classify("button.living_hdmi") == ("button", "button.living_hdmi")
+    assert classify("switch.not_a_button") is None
+    assert classify("key:source") == ("key", "KEY_SOURCE")
+    assert classify("key:nope") is None
+    payload = proto_custom_sources.source_payload(
+        name="HDMI1",
+        hidden=False,
+        buttons=["source", "right", "right", "ok"],
+        interval=0.1,
+    )
+    assert payload["keys"] == ["KEY_SOURCE", "KEY_RIGHT", "KEY_RIGHT", "KEY_OK"]
+    assert payload["buttons"] == ["source", "right", "right", "ok"]
+    collapsed = proto_custom_sources.collapse_source_actions(payload["buttons"])
+    assert collapsed == [("source", 1), ("right", 2), ("ok", 1)]
+    assert proto_custom_sources.expand_source_steps(collapsed) == [
+        "source",
+        "right",
+        "right",
+        "ok",
+    ]
+
+
+def test_hidden_sources_stay_callable_but_leave_source_list(proto_custom_sources) -> None:
+    sources = proto_custom_sources.normalize_custom_sources(
+        [
+            {"name": "HDMI1", "keys": ["KEY_SOURCE", "KEY_OK"]},
+            {
+                "name": "HDMI2",
+                "keys": ["KEY_SOURCE", "KEY_RIGHT", "KEY_OK"],
+                "hidden": True,
+                "interval": 0.2,
+            },
+        ]
+    )
+    assert proto_custom_sources.visible_source_names(sources) == ["HDMI1"]
+    copied = proto_custom_sources.copy_sources(sources)
+    assert copied[1]["hidden"] is True
+    assert copied[1]["interval"] == 0.2
+    found = proto_custom_sources.find_custom_source(sources, "hdmi2")
+    assert found is not None and found["name"] == "HDMI2"
+    assert proto_custom_sources.source_key_delay(found, 0.1) == 0.2
+    assert proto_custom_sources.source_key_delay(sources[0], 0.1) == 0.1
+
+
 def test_default_key_delay_is_snappier(proto_const) -> None:
     assert proto_const.DEFAULT_SOURCE_KEY_DELAY == 0.1
     assert 0.5 in proto_const.LEGACY_SOURCE_KEY_DELAYS
@@ -224,3 +273,77 @@ def test_open_source_retries_local_before_mqtt(proto_client) -> None:
     assert attempts["key"] == 3
     assert attempts["mqtt"] == 0
     assert pauses == [0.1, 0.1]
+
+
+def test_send_key_without_mqtt_uses_lan_remoter(proto_client, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    sent: list[str] = []
+
+    def fake_lan(host, key, **kwargs):
+        sent.append(key)
+        return 200
+
+    monkeypatch.setattr(proto_client, "send_local_key", fake_lan)
+    client.send_key("KEY_RIGHT")
+    assert sent == ["KEY_RIGHT"]
+
+
+def test_send_key_without_mqtt_or_lan_is_connection_error(
+    proto_client, monkeypatch
+) -> None:
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    monkeypatch.setattr(proto_client, "send_local_key", lambda *a, **k: None)
+    with pytest.raises(ConnectionError, match="not connected"):
+        client.send_key("KEY_RIGHT")
+
+
+def test_open_source_without_mqtt_or_lan_is_connection_error(
+    proto_client, monkeypatch
+) -> None:
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    monkeypatch.setattr(proto_client, "push_voice", lambda *a, **k: None)
+    monkeypatch.setattr(proto_client, "send_local_key", lambda *a, **k: None)
+    with pytest.raises(ConnectionError, match="not connected"):
+        client.open_source()
+
+
+def test_run_key_sequence_without_mqtt_uses_lan(proto_client, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    client._control_warmup = False
+    sent: list[str] = []
+
+    def fake_lan(host, key, **kwargs):
+        sent.append(key)
+        return 200
+
+    monkeypatch.setattr(proto_client, "send_local_key", fake_lan)
+    monkeypatch.setattr(proto_client, "push_voice", lambda *a, **k: 200)
+    client.run_key_sequence(["KEY_SOURCE", "KEY_RIGHT", "KEY_OK"], delay=0)
+    assert sent == ["KEY_RIGHT", "KEY_OK"]
+
+
+def test_require_creds_is_connection_error(proto_client) -> None:
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    with pytest.raises(ConnectionError, match="Not connected"):
+        client._require_creds()
+
+
+def test_hub_source_macros_reconnect_and_fail_soft() -> None:
+    from pathlib import Path
+
+    hub = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components"
+        / "hisense_e7n"
+        / "hub.py"
+    ).read_text(encoding="utf-8")
+    assert "_ensure_source_control" in hub
+    assert "mqtt_connected" in hub
+    assert "Could not send source keys" in hub
+    entity = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components"
+        / "hisense_e7n"
+        / "entity.py"
+    ).read_text(encoding="utf-8")
+    assert "except RuntimeError as err" in entity
