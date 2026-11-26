@@ -1,15 +1,16 @@
 """Install and load the options-dialog footer script.
 
-Home Assistant option forms only expose Cancel + Submit. This copies the
-bundled JS into ``<config>/www/hisense_e7n/`` (HA serves that as ``/local/``)
-and registers it with ``extra_js_url``. Hidden menu rows remain as a fallback
-if the script does not run.
+Home Assistant option forms only expose Cancel + Submit. The JS lives in
+``frontend/`` inside the integration (not ``www/``, which Windows locks while
+HA is running). Setup copies it to ``<config>/www/hisense_e7n/`` (served as
+``/local/``) and registers ``extra_js_url``.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 _DATA_KEY = f"{DOMAIN}_flow_ui"
-_BUNDLE_WWW = Path(__file__).resolve().parent / "www"
+_BUNDLE_JS = Path(__file__).resolve().parent / "frontend" / "hisense_e7n_flow.js"
 _JS_NAME = "hisense_e7n_flow.js"
 _LOCAL_URL = f"/local/{DOMAIN}/{_JS_NAME}"
 
@@ -33,21 +34,34 @@ def _version() -> str:
     return str(version) if version else "0"
 
 
+def _try_remove_legacy_component_www() -> None:
+    """Drop an old in-integration www/ folder so Windows can update the package."""
+    legacy = Path(__file__).resolve().parent / "www"
+    if not legacy.exists():
+        return
+    try:
+        shutil.rmtree(legacy)
+        _LOGGER.info("Removed leftover integration www folder %s", legacy)
+    except OSError as err:
+        _LOGGER.warning(
+            "Stop Home Assistant once, then delete %s (Windows has it locked): %s",
+            legacy,
+            err,
+        )
+
+
 def install_flow_www(config_dir: str | Path) -> Path:
-    """Copy bundled ``www/`` files into ``<config>/www/hisense_e7n/``."""
+    """Copy the bundled footer script into ``<config>/www/hisense_e7n/``."""
     dest_dir = Path(config_dir) / "www" / DOMAIN
     dest_dir.mkdir(parents=True, exist_ok=True)
-    if not _BUNDLE_WWW.is_dir():
-        raise FileNotFoundError(f"bundled www missing: {_BUNDLE_WWW}")
-    for src in sorted(_BUNDLE_WWW.iterdir()):
-        if not src.is_file():
-            continue
-        dest = dest_dir / src.name
-        data = src.read_bytes()
-        if dest.is_file() and dest.read_bytes() == data:
-            continue
+    if not _BUNDLE_JS.is_file():
+        raise FileNotFoundError(f"bundled footer script missing: {_BUNDLE_JS}")
+    dest = dest_dir / _JS_NAME
+    data = _BUNDLE_JS.read_bytes()
+    if not (dest.is_file() and dest.read_bytes() == data):
         dest.write_bytes(data)
         _LOGGER.info("Installed options footer script at %s", dest)
+    _try_remove_legacy_component_www()
     return dest_dir
 
 

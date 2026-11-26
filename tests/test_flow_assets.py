@@ -84,7 +84,7 @@ def test_strings_and_en_match_tcl_source_ux() -> None:
 
 
 def test_footer_script_posts_go_back_and_hides_menu_rows() -> None:
-    script = (_ROOT / "www" / "hisense_e7n_flow.js").read_text(encoding="utf-8")
+    script = (_ROOT / "frontend" / "hisense_e7n_flow.js").read_text(encoding="utf-8")
     assert 'DOMAIN = "hisense_e7n"' in script
     assert 'sources: ["save", "sources_done"]' in script
     assert "source_seq_kind_back" in script
@@ -136,9 +136,10 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_23_7() -> None:
+def test_version_is_1_23_8() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.23.7"
+    assert manifest["version"] == "1.23.8"
+    assert not (_ROOT / "www").exists()
 
 
 def test_sources_menu_save_is_footer_not_row() -> None:
@@ -147,7 +148,7 @@ def test_sources_menu_save_is_footer_not_row() -> None:
         "async def async_step_sources_done", 1
     )[0]
     assert 'menu.extend(["save", "sources_done"])' in helper
-    script = (_ROOT / "www" / "hisense_e7n_flow.js").read_text(encoding="utf-8")
+    script = (_ROOT / "frontend" / "hisense_e7n_flow.js").read_text(encoding="utf-8")
     assert 'back: "返回"' in script
     assert 'save: "保存"' in script
     assert 'appearance", "plain"' in script
@@ -160,7 +161,7 @@ def test_install_flow_www_copies_into_config_www(tmp_path) -> None:
     flow_ui = load_proto("flow_ui")
     dest_dir = flow_ui.install_flow_www(tmp_path)
     copied = dest_dir / "hisense_e7n_flow.js"
-    bundled = _ROOT / "www" / "hisense_e7n_flow.js"
+    bundled = _ROOT / "frontend" / "hisense_e7n_flow.js"
     assert dest_dir == tmp_path / "www" / "hisense_e7n"
     assert copied.read_bytes() == bundled.read_bytes()
     mtime = copied.stat().st_mtime_ns

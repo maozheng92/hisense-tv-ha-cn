@@ -411,7 +411,7 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
         return bool(user_input) and _go_back_chosen(user_input.get(ATTR_GO_BACK))
 
     def _with_back(self, schema: vol.Schema | dict[Any, Any]) -> vol.Schema:
-        # No in-form Go-back control. www/hisense_e7n_flow.js posts
+        # No in-form Go-back control. frontend/hisense_e7n_flow.js posts
         # {go_back: True} from the dialog footer (返回 left, 提交 right).
         mapping = schema.schema if isinstance(schema, vol.Schema) else schema
         return _SchemaWithBack(mapping)
