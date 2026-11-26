@@ -104,6 +104,9 @@ def test_footer_script_posts_go_back_and_hides_menu_rows() -> None:
     flow_ui = (_ROOT / "flow_ui.py").read_text(encoding="utf-8")
     assert "es5=True" in flow_ui
     assert "add_extra_js_url" in flow_ui
+    assert "/local/" in flow_ui
+    assert "install_flow_www" in flow_ui
+    assert "StaticPathConfig" not in flow_ui
     init_py = (_ROOT / "__init__.py").read_text(encoding="utf-8")
     assert "async_setup_flow_ui" in init_py
     assert "async def async_setup(" in init_py
@@ -133,9 +136,9 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_23_6() -> None:
+def test_version_is_1_23_7() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.23.6"
+    assert manifest["version"] == "1.23.7"
 
 
 def test_sources_menu_save_is_footer_not_row() -> None:
@@ -149,3 +152,17 @@ def test_sources_menu_save_is_footer_not_row() -> None:
     assert 'save: "保存"' in script
     assert 'appearance", "plain"' in script
     assert "unelevated" in script
+
+
+def test_install_flow_www_copies_into_config_www(tmp_path) -> None:
+    from conftest import load_proto
+
+    flow_ui = load_proto("flow_ui")
+    dest_dir = flow_ui.install_flow_www(tmp_path)
+    copied = dest_dir / "hisense_e7n_flow.js"
+    bundled = _ROOT / "www" / "hisense_e7n_flow.js"
+    assert dest_dir == tmp_path / "www" / "hisense_e7n"
+    assert copied.read_bytes() == bundled.read_bytes()
+    mtime = copied.stat().st_mtime_ns
+    flow_ui.install_flow_www(tmp_path)
+    assert copied.stat().st_mtime_ns == mtime
