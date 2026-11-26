@@ -198,6 +198,20 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
             wait = DEFAULT_SOURCE_KEY_DELAY
         self.source_key_delay = max(0.0, min(5.0, wait))
 
+    async def _ensure_source_control(self) -> None:
+        """Reconnect MQTT if needed, else wait for the LAN remoter (volume path)."""
+        client = self.client
+        if client.mqtt_connected:
+            return
+        try:
+            await client.async_connect()
+        except (ConnectionError, OSError, RuntimeError) as err:
+            _LOGGER.info("MQTT reconnect before source macro failed: %s", err)
+        if not client.mqtt_connected:
+            await asyncio.get_running_loop().run_in_executor(
+                None, client._wait_for_remoter
+            )
+
     async def async_press_source_buttons(self, source: str) -> None:
         """Run a custom source KEY / HA-button sequence (TCL layout)."""
         custom = find_custom_source(self.custom_sources, source)
@@ -212,27 +226,33 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
             for action in actions
             if (classified := classify_source_action(action)) is not None
         }
-        if kinds == {KIND_KEY}:
-            await self.client.async_run_key_sequence(
-                actions_to_wire_keys(actions), delay=delay
-            )
-        else:
-            for step, action in enumerate(actions):
-                classified = classify_source_action(action)
-                if classified is None:
-                    raise HomeAssistantError(f"Unknown source action {action!r}")
-                kind, value = classified
-                if kind == KIND_KEY:
-                    await self.async_send_key(value)
-                else:
-                    await self.hass.services.async_call(
-                        "button",
-                        "press",
-                        {ATTR_ENTITY_ID: value},
-                        blocking=True,
-                    )
-                if step < len(actions) - 1 and delay > 0:
-                    await asyncio.sleep(delay)
+        try:
+            await self._ensure_source_control()
+            if kinds == {KIND_KEY}:
+                await self.client.async_run_key_sequence(
+                    actions_to_wire_keys(actions), delay=delay
+                )
+            else:
+                for step, action in enumerate(actions):
+                    classified = classify_source_action(action)
+                    if classified is None:
+                        raise HomeAssistantError(f"Unknown source action {action!r}")
+                    kind, value = classified
+                    if kind == KIND_KEY:
+                        await self.async_send_key(value)
+                    else:
+                        await self.hass.services.async_call(
+                            "button",
+                            "press",
+                            {ATTR_ENTITY_ID: value},
+                            blocking=True,
+                        )
+                    if step < len(actions) - 1 and delay > 0:
+                        await asyncio.sleep(delay)
+        except HomeAssistantError:
+            raise
+        except (RuntimeError, ConnectionError, OSError) as err:
+            raise HomeAssistantError(str(err) or "Could not send source keys") from err
         self.selected_source = str(custom["name"])
         self.async_set_updated_data(self.client.state)
 

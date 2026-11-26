@@ -273,3 +273,77 @@ def test_open_source_retries_local_before_mqtt(proto_client) -> None:
     assert attempts["key"] == 3
     assert attempts["mqtt"] == 0
     assert pauses == [0.1, 0.1]
+
+
+def test_send_key_without_mqtt_uses_lan_remoter(proto_client, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    sent: list[str] = []
+
+    def fake_lan(host, key, **kwargs):
+        sent.append(key)
+        return 200
+
+    monkeypatch.setattr(proto_client, "send_local_key", fake_lan)
+    client.send_key("KEY_RIGHT")
+    assert sent == ["KEY_RIGHT"]
+
+
+def test_send_key_without_mqtt_or_lan_is_connection_error(
+    proto_client, monkeypatch
+) -> None:
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    monkeypatch.setattr(proto_client, "send_local_key", lambda *a, **k: None)
+    with pytest.raises(ConnectionError, match="not connected"):
+        client.send_key("KEY_RIGHT")
+
+
+def test_open_source_without_mqtt_or_lan_is_connection_error(
+    proto_client, monkeypatch
+) -> None:
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    monkeypatch.setattr(proto_client, "push_voice", lambda *a, **k: None)
+    monkeypatch.setattr(proto_client, "send_local_key", lambda *a, **k: None)
+    with pytest.raises(ConnectionError, match="not connected"):
+        client.open_source()
+
+
+def test_run_key_sequence_without_mqtt_uses_lan(proto_client, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    client._control_warmup = False
+    sent: list[str] = []
+
+    def fake_lan(host, key, **kwargs):
+        sent.append(key)
+        return 200
+
+    monkeypatch.setattr(proto_client, "send_local_key", fake_lan)
+    monkeypatch.setattr(proto_client, "push_voice", lambda *a, **k: 200)
+    client.run_key_sequence(["KEY_SOURCE", "KEY_RIGHT", "KEY_OK"], delay=0)
+    assert sent == ["KEY_RIGHT", "KEY_OK"]
+
+
+def test_require_creds_is_connection_error(proto_client) -> None:
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    with pytest.raises(ConnectionError, match="Not connected"):
+        client._require_creds()
+
+
+def test_hub_source_macros_reconnect_and_fail_soft() -> None:
+    from pathlib import Path
+
+    hub = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components"
+        / "hisense_e7n"
+        / "hub.py"
+    ).read_text(encoding="utf-8")
+    assert "_ensure_source_control" in hub
+    assert "mqtt_connected" in hub
+    assert "Could not send source keys" in hub
+    entity = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components"
+        / "hisense_e7n"
+        / "entity.py"
+    ).read_text(encoding="utf-8")
+    assert "except RuntimeError as err" in entity

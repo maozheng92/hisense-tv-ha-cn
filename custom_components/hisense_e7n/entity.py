@@ -31,6 +31,8 @@ def tv_errors() -> Iterator[None]:
         raise HomeAssistantError(str(err)) from err
     except OSError as err:
         raise HomeAssistantError(str(err)) from err
+    except RuntimeError as err:
+        raise HomeAssistantError(str(err)) from err
 
 
 class HisenseTvEntity(CoordinatorEntity[HisenseTvHub]):

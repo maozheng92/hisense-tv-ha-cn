@@ -32,7 +32,7 @@ E7N Pro（以及同代 E7N / E7NQ Pro）固件在 2024 之后通常还要：
 
 ## 集成做什么
 
-`custom_components/hisense_e7n`（1.23.5 起布局对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，应用走媒体浏览器，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
+`custom_components/hisense_e7n`（1.23.6 起布局对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，应用走媒体浏览器，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
 
 - `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台；安装的应用在 **媒体浏览器**（`browse_media` / `play_media`，类型 `app`），也保留 `hisense_e7n.launch_app`。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量只有 +/-（`VOLUME_STEP`），没有滑块
 - `remote`：与 TCL 一样不另起实体名（`_attr_name = None`，沿用设备名和 remote 平台默认图标）。发送 `KEY_*`（可用 Universal Remote Card）；关机状态下的电源键走同一套开机方式。爱家遥控页上的键（电源、音量、截屏、信号源、AI识图、方向键等）**不会**建成 `button` 实体，仍可通过 `remote.send_command` / `hisense_e7n.send_key` / 自定义输入源宏调用。升级后会删掉旧版留下的 `button.*`。
