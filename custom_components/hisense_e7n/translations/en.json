@@ -86,7 +86,6 @@
         "title": "Connection",
         "description": "Host {host}. Pause between keys is the default for sources that do not set their own interval.",
         "data": {
-          "go_back": "Go back",
           "host": "TV IP address",
           "port": "MQTT port",
           "mac": "TV Wi-Fi MAC",
@@ -94,54 +93,51 @@
           "source_key_delay": "Default pause between presses"
         },
         "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "mac": "Wi-Fi MAC for Wake-on-LAN. Required when power-on is Wake-on-LAN.",
           "source_key_delay": "Default seconds to wait after each press except the last. Each source can override this."
-        }
+        },
+        "submit": "Submit"
       },
       "power_on": {
         "title": "Power on",
         "description": "Pick a wake method. For infrared, choose the remote here, then the learned command.",
         "data": {
-          "go_back": "Go back",
           "power_on_mode": "Power on with",
           "power_on_button": "Power-on button",
           "power_on_remote": "Infrared remote"
         },
         "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "power_on_remote": "A Home Assistant remote entity that has learned IR codes."
-        }
+        },
+        "submit": "Submit"
       },
       "ir_details": {
         "title": "Power-on IR command",
         "description": "Choose the learned device and command for {remote_entity} (codes file: {codes_file}).",
         "data": {
-          "go_back": "Go back",
           "power_on_device": "Device",
           "power_on_command": "Command"
         },
         "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "power_on_device": "Device name from the remote's learned codes. Required for Harmony Hub and Xiaomi Home.",
           "power_on_command": "Command name from that device (for example Power or power_on)."
-        }
+        },
+        "submit": "Submit"
       },
       "volume": {
         "title": "Volume buttons",
         "description": "Optional entities that replace LAN KEY_VOLUME* for media_player +/-.",
         "data": {
-          "go_back": "Go back",
           "volume_up_button": "音量加按钮",
           "volume_down_button": "音量减按钮",
           "音量加按钮": "音量加按钮",
           "音量减按钮": "音量减按钮"
         },
         "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "音量加按钮": "可选。音量加会按下这个实体，不再发电视 LAN 键。",
           "音量减按钮": "可选。音量减会按下这个实体，不再发电视 LAN 键。"
-        }
+        },
+        "submit": "Submit"
       },
       "sources": {
         "title": "Input sources",
@@ -158,46 +154,41 @@
         "title": "Add input source",
         "description": "Name the input first. Next you choose this TV's keys or button entities, then how many times to press each one.",
         "data": {
-          "go_back": "Go back",
           "name": "Name",
           "hidden": "Hide from source list",
           "interval": "Pause between presses"
         },
         "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "name": "Shown on media_player.select_source (for example HDMI 1).",
           "hidden": "Keep the source configured but omit it from the TV source list.",
           "interval": "Seconds to wait after each press except the last."
-        }
+        },
+        "submit": "Submit"
       },
       "source_edit": {
         "title": "Edit input source",
         "description": "Pick the source to change.",
         "data": {
-          "go_back": "Go back",
           "name": "Source"
         },
-        "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft."
-        }
+        "submit": "Submit"
       },
       "source_form": {
         "title": "Edit input source",
         "description": "Current sequence: {sequence}",
         "data": {
-          "go_back": "Go back",
           "name": "Name",
           "hidden": "Hide from source list",
           "interval": "Pause between presses",
           "edit_sequence": "Replace press sequence"
         },
         "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "name": "Shown on media_player.select_source (for example HDMI 1).",
           "hidden": "Keep the source configured but omit it from the TV source list.",
           "interval": "Seconds to wait after each press except the last.",
           "edit_sequence": "Turn on to pick TV keys or button entities again and set how many times each is pressed."
-        }
+        },
+        "submit": "Submit"
       },
       "source_seq_kind": {
         "title": "Press sequence type",
@@ -212,19 +203,17 @@
         "title": "Choose presses",
         "description": "Using {kind}. Current sequence: {sequence}\nPick items in the order they should be sent. Next you will set how many times each one is pressed.",
         "data": {
-          "go_back": "Go back",
           "actions": "Items"
         },
         "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "actions": "Drag to reorder. Each item is listed once; repeats are set on the next screen."
-        }
+        },
+        "submit": "Submit"
       },
       "source_seq_repeat": {
         "title": "How many times",
         "description": "Sequence so far: {sequence}\n{repeat_help}",
         "data": {
-          "go_back": "Go back",
           "repeat_0": "{item_0}",
           "repeat_1": "{item_1}",
           "repeat_2": "{item_2}",
@@ -248,31 +237,25 @@
           "add_more": "Add another group"
         },
         "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft.",
           "add_more": "Turn on to append more TV keys or button entities after these."
-        }
+        },
+        "submit": "Submit"
       },
       "source_delete": {
         "title": "Delete input source",
         "description": "Remove a source from the list. This cannot be undone after Save.",
         "data": {
-          "go_back": "Go back",
           "name": "Source"
         },
-        "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft."
-        }
+        "submit": "Submit"
       },
       "source_reorder": {
         "title": "Reorder input sources",
         "description": "All input sources are listed. Drag to change the order shown on the media player. Keep every source in the list.",
         "data": {
-          "go_back": "Go back",
           "source_order": "Order"
         },
-        "data_description": {
-          "go_back": "Choose this, then submit. This page is not written to the draft."
-        }
+        "submit": "Submit"
       }
     },
     "error": {
@@ -298,11 +281,6 @@
     }
   },
   "selector": {
-    "go_back_choice": {
-      "options": {
-        "go_back": "Go back"
-      }
-    },
     "power_on_mode": {
       "options": {
         "button": "Button, switch, or script",

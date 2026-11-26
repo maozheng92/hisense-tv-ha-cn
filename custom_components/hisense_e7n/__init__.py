@@ -48,8 +48,19 @@ _LOGGER = logging.getLogger(__name__)
 HisenseTvConfigEntry = ConfigEntry
 
 
+async def async_setup(hass: HomeAssistant, _config: dict) -> bool:
+    """Register the options-dialog footer script (TCL extra_js_url pattern)."""
+    from .flow_ui import async_setup_flow_ui
+
+    await async_setup_flow_ui(hass)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up one E7N Pro from a config entry."""
+    from .flow_ui import async_setup_flow_ui
+
+    await async_setup_flow_ui(hass)
     hass.data.setdefault(DOMAIN, {})
 
     data = {**entry.data, **entry.options}

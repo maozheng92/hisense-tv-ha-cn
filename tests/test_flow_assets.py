@@ -46,7 +46,9 @@ def test_zh_uses_button_entity_name() -> None:
     assert "go_back" not in zh["options"]["step"]["init"].get("data", {})
     assert "go_back" not in zh["options"]["step"]["init"].get("menu_options", {})
     for step_id in _FORM_STEPS:
-        assert zh["options"]["step"][step_id]["data"]["go_back"] == "返回上一界面"
+        assert "go_back" not in zh["options"]["step"][step_id].get("data", {})
+        assert "go_back" not in zh["options"]["step"][step_id].get("data_description", {})
+        assert zh["options"]["step"][step_id]["submit"] == "提交"
     hidden = zh["options"]["step"]["source_add"]["data"]["hidden"]
     assert hidden == "从输入源列表中隐藏"
     assert zh["options"]["step"]["init"]["menu_options"]["volume"] == "音量按钮"
@@ -54,11 +56,7 @@ def test_zh_uses_button_entity_name() -> None:
     assert "entity" in zh
     assert "button" not in zh["entity"]
     assert "remote" not in zh["entity"]
-    assert zh["selector"]["go_back_choice"]["options"]["go_back"] == "返回上一界面"
-    for step_id in _FORM_STEPS:
-        helper = zh["options"]["step"][step_id]["data_description"]["go_back"]
-        assert "打开后点提交" not in helper
-        assert "点选" in helper
+    assert "go_back_choice" not in zh.get("selector", {})
 
 
 def test_strings_and_en_match_tcl_source_ux() -> None:
@@ -74,21 +72,45 @@ def test_strings_and_en_match_tcl_source_ux() -> None:
         assert step["source_add"]["data"]["name"] == "Name"
         assert step["source_reorder"]["data"]["source_order"] == "Order"
         for step_id in _FORM_STEPS:
-            assert step[step_id]["data"]["go_back"] == "Go back"
-            helper = step[step_id]["data_description"]["go_back"]
-            assert "Turn on and submit" not in helper
+            assert "go_back" not in step[step_id].get("data", {})
+            assert "go_back" not in step[step_id].get("data_description", {})
+            assert step[step_id]["submit"] == "Submit"
         assert "button" not in data.get("entity", {})
         assert "remote" not in data.get("entity", {})
-        assert data["selector"]["go_back_choice"]["options"]["go_back"] == "Go back"
+        assert "go_back_choice" not in data.get("selector", {})
 
 
-def test_go_back_is_not_a_boolean_switch() -> None:
+def test_footer_script_posts_go_back_and_hides_menu_rows() -> None:
+    script = (_ROOT / "www" / "hisense_e7n_flow.js").read_text(encoding="utf-8")
+    assert 'DOMAIN = "hisense_e7n"' in script
+    assert 'sources: ["sources_done"]' in script
+    assert "source_seq_kind_back" in script
+    assert "go_back: true" in script
+    assert "dialog-data-entry-flow" in script
+    assert 'back: "返回"' in script
+    assert "secondaryAction" in script
+    assert "primaryAction" in script
+    assert "space-between" in script
+    assert "deepQuery(document, DIALOG_SEL)" in script
+    flow_ui = (_ROOT / "flow_ui.py").read_text(encoding="utf-8")
+    assert "es5=True" in flow_ui
+    assert "add_extra_js_url" in flow_ui
+    init_py = (_ROOT / "__init__.py").read_text(encoding="utf-8")
+    assert "async_setup_flow_ui" in init_py
+    assert "async def async_setup(" in init_py
+
+
+def test_go_back_is_footer_not_schema_field() -> None:
     text = (_ROOT / "config_flow.py").read_text(encoding="utf-8")
     helper = text.split("def _with_back", 1)[1].split("def _show_form", 1)[0]
     assert "BooleanSelector" not in helper
-    assert "_go_back_selector" in helper
-    assert "button_toggle" in text
-    assert "description_placeholders" in text.split("def _show_form", 1)[1].split("def _menu_placeholders", 1)[0]
+    assert "_go_back_selector" not in text
+    assert "button_toggle" not in text
+    assert "hisense_e7n_flow.js" in helper
+    assert "_SchemaWithBack(mapping)" in helper
+    assert "description_placeholders" in text.split("def _show_form", 1)[1].split(
+        "def _menu_placeholders", 1
+    )[0]
 
 
 def test_remote_entity_matches_tcl_unnamed_device() -> None:
@@ -100,3 +122,8 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "_attr_entity_picture" not in text
     assert "_attr_device_class" not in text
     assert "mdi:remote" not in text
+
+
+def test_version_is_1_23_3() -> None:
+    manifest = _load("manifest.json")
+    assert manifest["version"] == "1.23.3"
