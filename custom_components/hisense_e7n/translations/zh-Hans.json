@@ -145,6 +145,7 @@
           "source_edit": "修改输入源",
           "source_delete": "删除输入源",
           "source_reorder": "调整顺序",
+          "save": "保存",
           "sources_done": "返回"
         }
       },

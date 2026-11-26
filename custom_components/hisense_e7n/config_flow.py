@@ -818,7 +818,8 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
             menu.extend(["source_edit", "source_delete"])
             if len(self._data[CONF_CUSTOM_SOURCES]) > 1:
                 menu.append("source_reorder")
-        menu.append("sources_done")
+        # save / sources_done are footer actions; the frontend script hides the rows.
+        menu.extend(["save", "sources_done"])
         return self.async_show_menu(
             step_id="sources",
             menu_options=menu,

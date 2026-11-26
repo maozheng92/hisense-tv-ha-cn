@@ -1,6 +1,6 @@
 /**
- * Hisense E7N options dialog: put Back at the bottom left and keep Submit
- * at the bottom right (same footer as TCL 添加输入源).
+ * Hisense E7N options dialog: Back (plain) at the bottom left.
+ * Form steps keep native Submit. The 输入源 menu uses filled Save, not Submit.
  *
  * Home Assistant renders dialog-data-entry-flow inside shadow roots, so this
  * script walks them. The Python schema accepts {go_back: true} from Back
@@ -16,7 +16,7 @@
   const MARK = "data-hisense-e7n";
   const HIDE_MARK = "data-hisense-e7n-hide";
   const HIDDEN_MENU = {
-    sources: ["sources_done"],
+    sources: ["save", "sources_done"],
     source_seq_kind: ["source_seq_kind_back"],
   };
 
@@ -99,10 +99,12 @@
       for (const el of items) {
         const id = menuItemId(el);
         const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        const hideSave = hidden.has("save");
+        const hideBack =
+          hidden.has("sources_done") || hidden.has("source_seq_kind_back");
         const byLabel =
-          hidden.has("sources_done") || hidden.has("source_seq_kind_back")
-            ? text === "返回" || text === "Back"
-            : false;
+          (hideSave && (text === "保存" || text === "Save")) ||
+          (hideBack && (text === "返回" || text === "Back"));
         if (hidden.has(id) || byLabel) hideEl(el);
       }
     }
@@ -238,7 +240,7 @@
   }
 
   function wantsSave(step) {
-    return false;
+    return step.step_id === "sources";
   }
 
   function wantsBack(step) {
@@ -254,6 +256,11 @@
       return { next_step_id: "back" };
     }
     return { go_back: true };
+  }
+
+  function savePayload(step) {
+    if (step.type === "menu") return { next_step_id: "save" };
+    return {};
   }
 
   function isHisenseOptions(dialog, params, step) {
@@ -307,7 +314,7 @@
       footer.appendChild(
         makeButton(text.save, {
           primary: true,
-          onClick: () => continueFlow(dialog, {}),
+          onClick: () => continueFlow(dialog, savePayload(step)),
         })
       );
     }

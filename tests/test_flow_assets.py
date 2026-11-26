@@ -25,6 +25,7 @@ _SOURCE_MENU = (
     "source_edit",
     "source_delete",
     "source_reorder",
+    "save",
     "sources_done",
 )
 
@@ -43,6 +44,7 @@ def test_zh_uses_button_entity_name() -> None:
     assert kind["source_seq_buttons"] == "按钮实体"
     assert kind["source_seq_kind_back"] == "返回"
     assert zh["options"]["step"]["sources"]["menu_options"]["sources_done"] == "返回"
+    assert zh["options"]["step"]["sources"]["menu_options"]["save"] == "保存"
     assert "go_back" not in zh["options"]["step"]["init"].get("data", {})
     assert "go_back" not in zh["options"]["step"]["init"].get("menu_options", {})
     for step_id in _FORM_STEPS:
@@ -65,6 +67,7 @@ def test_strings_and_en_match_tcl_source_ux() -> None:
         step = data["options"]["step"]
         assert tuple(step["init"]["menu_options"]) == _INIT_MENU
         assert step["sources"]["menu_options"]["sources_done"] == "Back"
+        assert step["sources"]["menu_options"]["save"] == "Save"
         assert tuple(step["sources"]["menu_options"]) == _SOURCE_MENU
         assert step["source_seq_kind"]["menu_options"]["source_seq_kind_back"] == "Back"
         assert step["source_seq_kind"]["menu_options"]["source_seq_buttons"] == "Button entities"
@@ -83,9 +86,11 @@ def test_strings_and_en_match_tcl_source_ux() -> None:
 def test_footer_script_posts_go_back_and_hides_menu_rows() -> None:
     script = (_ROOT / "www" / "hisense_e7n_flow.js").read_text(encoding="utf-8")
     assert 'DOMAIN = "hisense_e7n"' in script
-    assert 'sources: ["sources_done"]' in script
+    assert 'sources: ["save", "sources_done"]' in script
     assert "source_seq_kind_back" in script
     assert "go_back: true" in script
+    assert 'next_step_id: "save"' in script
+    assert 'step.step_id === "sources"' in script
     assert "dialog-data-entry-flow" in script
     assert 'back: "返回"' in script
     assert "secondaryAction" in script
@@ -124,6 +129,19 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_23_3() -> None:
+def test_version_is_1_23_4() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.23.3"
+    assert manifest["version"] == "1.23.4"
+
+
+def test_sources_menu_save_is_footer_not_row() -> None:
+    text = (_ROOT / "config_flow.py").read_text(encoding="utf-8")
+    helper = text.split("async def async_step_sources", 1)[1].split(
+        "async def async_step_sources_done", 1
+    )[0]
+    assert 'menu.extend(["save", "sources_done"])' in helper
+    script = (_ROOT / "www" / "hisense_e7n_flow.js").read_text(encoding="utf-8")
+    assert 'back: "返回"' in script
+    assert 'save: "保存"' in script
+    assert 'appearance", "plain"' in script
+    assert "unelevated" in script

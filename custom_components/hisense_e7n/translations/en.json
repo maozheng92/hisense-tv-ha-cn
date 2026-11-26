@@ -147,6 +147,7 @@
           "source_edit": "Edit source",
           "source_delete": "Delete source",
           "source_reorder": "Reorder sources",
+          "save": "Save",
           "sources_done": "Back"
         }
       },

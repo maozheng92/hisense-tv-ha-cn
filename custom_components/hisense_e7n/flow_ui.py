@@ -1,8 +1,8 @@
-"""Load a small script that adds Back/Submit footer buttons on options dialogs.
+"""Load a small script that adds footer Back/Submit/Save on options dialogs.
 
 Home Assistant option forms only expose Cancel + Submit. TCL's options UI
-injects a real Back control (`extra_js_url` + static `www/`) so the footer is
-Back on the left and Submit on the right. Hidden menu rows remain as a
+injects footer buttons (`extra_js_url` + static `www/`): Back on the left,
+Submit on form steps, Save on the 输入源 menu. Hidden menu rows remain as a
 fallback if the script does not run.
 """
 
