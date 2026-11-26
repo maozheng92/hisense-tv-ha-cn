@@ -13,7 +13,7 @@ E7N Pro 结论与安装：[docs/e7n-pro-homeassistant.md](docs/e7n-pro-homeassis
 
 目录：`custom_components/hisense_e7n`
 
-拷到 HA 的 `config/custom_components/` 后重启，在「添加集成」里搜 **Hisense E7N Pro**。配对时电视需已开机，填写 IP 即可，**不用蓝牙地址**。爱家遥控页上的键通过 `remote` 实体发送，**不会**建成 `button` 实体。连不上 36669 时，集成会自动用爱家客户端证书、降低 TLS 安全级别，并在必要时回退明文 MQTT。若电视屏幕出现 4 位数字，调用 `hisense_e7n.submit_code`。爱家无法唤醒关机的电视。每台电视在配置里单独选择开机方式：**按钮 / 开关 / 脚本**，或一只红外遥控（`remote.send_command`），或 Wi-Fi MAC 网络唤醒。播放器支持自定义输入源、媒体浏览器里的已安装应用，以及上一台 / 下一台。音量只有 +/-，没有滑块。VIDAA MQTT `volumechange` 会报静音，接到 `is_volume_muted`。
+拷到 HA 的 `config/custom_components/` 后重启，在「添加集成」里搜 **Hisense E7N Pro**。升级后请**硬刷新 HA 前端**（Ctrl+Shift+R / 重启 HA），否则选项页脚「返回 / 保存」仍会用旧 extra JS。配对时电视需已开机，填写 IP 即可，**不用蓝牙地址**。爱家遥控页上的键通过 `remote` 实体发送，**不会**建成 `button` 实体。连不上 36669 时，集成会自动用爱家客户端证书、降低 TLS 安全级别，并在必要时回退明文 MQTT。若电视屏幕出现 4 位数字，调用 `hisense_e7n.submit_code`。爱家无法唤醒关机的电视。每台电视在配置里单独选择开机方式：**按钮 / 开关 / 脚本**，或一只红外遥控（`remote.send_command`），或 Wi-Fi MAC 网络唤醒。播放器支持自定义输入源、媒体浏览器里的已安装应用，以及上一台 / 下一台。音量只有 +/-，没有滑块。VIDAA MQTT `volumechange` 会报静音，接到 `is_volume_muted`。
 
 ```text
 custom_components/hisense_e7n/   # 本仓库

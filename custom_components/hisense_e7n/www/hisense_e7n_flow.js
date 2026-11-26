@@ -186,8 +186,16 @@
     el.setAttribute(MARK, primary ? "save" : "back");
     if (primary) {
       el.setAttribute("unelevated", "");
+      el.setAttribute("appearance", "accent");
+      el.setAttribute("variant", "brand");
+      el.style.marginInlineStart = "0";
+      el.style.marginInlineEnd = "0";
     } else {
       el.setAttribute("appearance", "plain");
+      el.setAttribute("variant", "plain");
+      // flex-end footer: this auto margin is what actually puts Back on the left.
+      el.style.marginInlineEnd = "auto";
+      el.style.marginRight = "auto";
     }
     el.textContent = text;
     el.addEventListener("click", (ev) => {
@@ -215,18 +223,65 @@
     );
   }
 
-  function layoutFooter(footer, { back, save }) {
-    const inner = footer.shadowRoot?.querySelector("footer") || footer;
-    if (!inner?.style) return;
-    inner.style.display = "flex";
-    inner.style.width = "100%";
+  function splitFooterCss() {
+    return `
+      footer, .footer, .actions, :host {
+        display: flex !important;
+        width: 100% !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        box-sizing: border-box !important;
+      }
+      slot[name="secondaryAction"] {
+        margin-inline-end: auto !important;
+      }
+      slot[name="primaryAction"] {
+        margin-inline-start: 0 !important;
+      }
+    `;
+  }
+
+  function applySplit(el, { back, save }) {
+    if (!el?.style) return;
+    el.style.setProperty("display", "flex", "important");
+    el.style.setProperty("width", "100%", "important");
+    el.style.setProperty("align-items", "center", "important");
     const hasPrimary =
       save ||
-      footer.querySelector('[slot="primaryAction"]') ||
-      footer.querySelector(`[${MARK}="save"]`);
-    if (back && hasPrimary) inner.style.justifyContent = "space-between";
-    else if (back && !hasPrimary) inner.style.justifyContent = "flex-start";
-    else inner.style.justifyContent = "flex-end";
+      el.querySelector?.('[slot="primaryAction"]') ||
+      el.querySelector?.(`[${MARK}="save"]`);
+    const justify =
+      back && hasPrimary
+        ? "space-between"
+        : back && !hasPrimary
+          ? "flex-start"
+          : "flex-end";
+    el.style.setProperty("justify-content", justify, "important");
+  }
+
+  function layoutFooter(footer, { back, save }) {
+    const root = footer.shadowRoot;
+    if (root && !root.querySelector("style[data-hisense-e7n]")) {
+      const style = document.createElement("style");
+      style.setAttribute("data-hisense-e7n", "1");
+      style.textContent = splitFooterCss();
+      root.appendChild(style);
+    }
+    applySplit(footer, { back, save });
+    if (root) {
+      root.querySelectorAll("footer, .footer, .actions").forEach((node) => {
+        applySplit(node, { back, save });
+      });
+    }
+    const backBtn = footer.querySelector(`[${MARK}="back"]`);
+    if (backBtn?.style) {
+      backBtn.style.setProperty("margin-inline-end", "auto", "important");
+      backBtn.style.setProperty("margin-right", "auto", "important");
+    }
+    const saveBtn = footer.querySelector(`[${MARK}="save"]`);
+    if (saveBtn?.style) {
+      saveBtn.style.setProperty("margin-inline-start", "0", "important");
+    }
   }
 
   function clearInjected(dialog) {
@@ -339,6 +394,13 @@
     if (dialog._hisenseE7nUiKey === key && marked && hasButtons) {
       hideMenuItems(dialog, step.step_id);
       hideGoBackFields(dialog);
+      const existing = findFooter(dialog);
+      if (existing) {
+        layoutFooter(existing, {
+          back: wantsBack(step),
+          save: wantsSave(step),
+        });
+      }
       return;
     }
 

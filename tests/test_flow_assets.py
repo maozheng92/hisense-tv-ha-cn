@@ -96,6 +96,10 @@ def test_footer_script_posts_go_back_and_hides_menu_rows() -> None:
     assert "secondaryAction" in script
     assert "primaryAction" in script
     assert "space-between" in script
+    assert 'setProperty("justify-content", justify, "important")' in script
+    assert 'margin-inline-end", "auto"' in script
+    assert 'appearance", "accent"' in script
+    assert 'appearance", "plain"' in script
     assert "deepQuery(document, DIALOG_SEL)" in script
     flow_ui = (_ROOT / "flow_ui.py").read_text(encoding="utf-8")
     assert "es5=True" in flow_ui
@@ -129,9 +133,9 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_23_4() -> None:
+def test_version_is_1_23_5() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.23.4"
+    assert manifest["version"] == "1.23.5"
 
 
 def test_sources_menu_save_is_footer_not_row() -> None:
