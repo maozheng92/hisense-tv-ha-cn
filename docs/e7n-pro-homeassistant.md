@@ -34,7 +34,7 @@ E7N Pro（以及同代 E7N / E7NQ Pro）固件在 2024 之后通常还要：
 
 `custom_components/hisense_e7n`（1.23.10 起布局对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，应用走媒体浏览器，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
 
-- `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台；安装的应用在 **媒体浏览器**（`browse_media` / `play_media`，类型 `app`），也保留 `hisense_e7n.launch_app`。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量加减仍走本机 HTTP `KEY_VOLUME*` 或选项里的 HA 按钮。当前音量/静音优先来自 **`ui_service/state` 的 `volume_value`**（音量 OSD，本机实测进站），并轮询 `gettvstate` / `getvolume`；爱家改静音后 HA 跟这条状态走。拖滑块不会发 `changevolume`。
+- `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台；安装的应用在 **媒体浏览器**（`browse_media` / `play_media`，类型 `app`），也保留 `hisense_e7n.launch_app`。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量加减仍走本机 HTTP `KEY_VOLUME*` 或选项里的 HA 按钮。当前音量/静音优先来自 **`ui_service/state` 的 `volume_value`**（音量 OSD，含 eARC `volume_type=1`），静音跟 `volume_type=2` / `mute_status`；开机、音量 ± / 静音后以及开机期间每 3 秒轮询 `gettvstate` / `getvolume`。拖滑块不会发 `changevolume`。
 - `remote`：与 TCL 一样不另起实体名（`_attr_name = None`，沿用设备名和 remote 平台默认图标）。发送 `KEY_*`（可用 Universal Remote Card）；关机状态下的电源键走同一套开机方式。爱家遥控页上的键（电源、音量、截屏、信号源、AI识图、方向键等）**不会**建成 `button` 实体，仍可通过 `remote.send_command` / `hisense_e7n.send_key` / 自定义输入源宏调用。升级后会删掉旧版留下的 `button.*`。
 - 配置流：先填 IP（连接），再选开机方式，再可选音量加减实体。不需要蓝牙地址。若电视屏幕弹出 4 位数字，调用 `hisense_e7n.submit_code`
 - 选项（对齐 TCL）：草稿菜单「连接 / 开机 / 音量按钮 / 输入源 / 保存」。子表单页脚左侧「返回」、右侧「提交」；**输入源**菜单行只有添加/修改/删除/调整顺序，页脚**左侧「返回」（plain）**、**右侧「保存」（filled）**，不是「提交」。页脚脚本在 `frontend/`，启动时自动安装到 `config/www/hisense_e7n/`（`/local/hisense_e7n/`）。**集成包内不再有 `www/`**（Windows 上 HA 占用该目录会导致无法覆盖更新）。若旧版 `custom_components/hisense_e7n/www` 删不掉，先**停止 Home Assistant** 再删，然后拷新版本。升级后请**硬刷新 HA 前端**。输入源可隐藏、单独设置间隔、用本集成按键或 HA `button.*` 组成序列（勾选 → 重复次数 → 可再加一组），并拖动排序
@@ -120,9 +120,9 @@ data:
 
 ## 音量与静音状态
 
-这台 E7N 在 HA 日志里**没有**出现过 `platform_service/…/volumechange`。音量 OSD 时会发部分 `ui_service/state`：`{"volume_value":18,"volume_type":1,"state":1}`。1.23.10 把这条接到 `media_player.volume_level`（0–1）和 `is_volume_muted`，并每 8 秒轮询 `gettvstate` + `getvolume`（PIN 对话框期间不轮询）。截屏元数据里若带 `volume_value` / `mute_status` 也会写入。
+这台 E7N 在 HA 日志里**没有**出现过 `platform_service/…/volumechange`。音量 OSD 时会发部分 `ui_service/state`：`{"volume_value":18,"volume_type":1,"state":1}`。1.23.11 把 **type 0 和 1** 都接到 `media_player.volume_level`（0–1）；type 2 或 `mute_status` 接到 `is_volume_muted`。完整 `gettvstate` 若把音量放在 `infoPackage` 里也会解析。开机、音量键、静音后，以及开机时每 3 秒轮询 `gettvstate` + `getvolume`（不轮询 applist；PIN 对话框期间不轮询）。截屏元数据里若带 `volume_value` / `mute_status` 也会写入。
 
-`volume_type=1` 是 HDMI ARC/eARC 的 CEC 音量；`volume_type=2` 且值为 0/1 是静音。加减仍发本机 `KEY_VOLUME*`，静音仍发 `KEY_MUTE`。实体属性 `volume_topic` 和日志 `MQTT volume from …` 标明实际进站主题。
+`volume_type=1` 是 HDMI ARC/eARC 的 CEC 音量（公共集成会丢掉这一路）。`volume_type=2` 且值为 0/1 是静音。加减仍发本机 `KEY_VOLUME*`，静音仍发 `KEY_MUTE`。实体属性 `volume_topic` 和日志 `MQTT volume from …` 标明实际进站主题。
 
 ## 添加集成时报「无法连接 36669」
 

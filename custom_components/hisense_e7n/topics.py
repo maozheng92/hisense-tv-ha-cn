@@ -127,6 +127,15 @@ def subscription_topics(creds: MqttCredentials, tv_mac: str | None = None) -> li
             if topic not in seen:
                 seen.add(topic)
                 topics.append(topic)
+        # Some firmware answers gettvstate / OSD on these, not /data/*.
+        for topic in (
+            f"/remoteapp/mobile/{ident}/ui_service/state",
+            f"/remoteapp/mobile/{ident}/ui_service/volume",
+            f"/remoteapp/mobile/{ident}/platform_service/actions/volumechange",
+        ):
+            if topic not in seen:
+                seen.add(topic)
+                topics.append(topic)
     for topic in _BROADCASTS:
         if topic not in seen:
             topics.append(topic)

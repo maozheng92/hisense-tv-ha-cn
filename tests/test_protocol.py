@@ -88,6 +88,8 @@ def test_pair_topic_and_subscriptions_are_concrete(proto_client, proto_credentia
     assert "/remoteapp/mobile/broadcast/platform_service/actions/volumechange" in subs
     assert f"/remoteapp/mobile/{creds.client_id}/platform_service/data/volume" in subs
     assert f"/remoteapp/mobile/{creds.client_id}/platform_service/data/volumechange" in subs
+    assert f"/remoteapp/mobile/{creds.client_id}/ui_service/state" in subs
+    assert f"/remoteapp/mobile/{creds.client_id}/platform_service/actions/volumechange" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/data/volume" in subs
 
 
@@ -371,7 +373,7 @@ def test_volume_step_lan_only_no_mqtt(
     monkeypatch.setattr(client, "_publish_action", publish_action)
     assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
     assert keys == ["KEY_VOLUMEUP"]
-    assert all(action == "getvolume" for _s, action, _p, _k in calls)
+    assert {action for _s, action, _p, _k in calls} == {"gettvstate", "getvolume"}
     assert not any(action in {"sendkey", "changevolume"} for _s, action, _p, _k in calls)
 
 
@@ -476,6 +478,8 @@ def test_on_connect_requests_getvolume(proto_client, proto_credentials) -> None:
         for topic in subscribed
     )
     assert any(topic.endswith("/actions/getvolume") for topic, _ in published)
+    assert any(topic.endswith("/actions/gettvstate") for topic, _ in published)
+    assert not any(topic.endswith("/actions/applist") for topic, _ in published)
     client.state.pin_requested = True
     published.clear()
     client._on_connect(mqtt_client, None, {}, 0)

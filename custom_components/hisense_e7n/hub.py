@@ -176,6 +176,7 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
                 _LOGGER.exception(
                     "Volume button %s.%s failed", call.domain, call.service
                 )
+            await self.hass.async_add_executor_job(self.client.refresh_volume_state)
             return
         key = KEY_VOLUMEUP if delta > 0 else KEY_VOLUMEDOWN
         await self.client.async_send_key(key)
@@ -390,11 +391,14 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
         state = self.client.state
         if (
             state.available
+            and state.power_on
             and not state.needs_pin
             and not state.pin_requested
         ):
             try:
-                await self.hass.async_add_executor_job(self.client.refresh_status)
+                await self.hass.async_add_executor_job(
+                    self.client.refresh_volume_state
+                )
             except Exception:  # noqa: BLE001
                 self.logger.debug("gettvstate/getvolume poll failed", exc_info=True)
         return self.client.state

@@ -165,17 +165,22 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
 
     async def async_volume_up(self) -> None:
         await self.hub.async_send_key(KEY_VOLUMEUP)
+        self._sync_volume_attrs()
         self.async_write_ha_state()
 
     async def async_volume_down(self) -> None:
         await self.hub.async_send_key(KEY_VOLUMEDOWN)
+        self._sync_volume_attrs()
         self.async_write_ha_state()
 
     async def async_set_volume_level(self, volume: float) -> None:
         """HA shows volume_level only with VOLUME_SET. Do not use changevolume."""
         del volume
         with tv_errors():
-            await self.hass.async_add_executor_job(self.hub.client.refresh_volume)
+            await self.hass.async_add_executor_job(
+                self.hub.client.refresh_volume_state
+            )
+        self._sync_volume_attrs()
         self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool) -> None:
@@ -183,6 +188,7 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         if tv.muted != mute:
             with tv_errors():
                 await self.hub.client.async_toggle_mute()
+            self._sync_volume_attrs()
             self.async_write_ha_state()
 
     async def async_media_play(self) -> None:

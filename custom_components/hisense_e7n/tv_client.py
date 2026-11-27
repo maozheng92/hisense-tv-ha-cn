@@ -41,6 +41,7 @@ from .const import (
     VOLUME_KEY_PAUSE,
     VOLUME_TYPE_ARC,
     VOLUME_TYPE_MUTE,
+    VOLUME_TYPE_TV,
     VOLUME_UNKNOWN_FLOOR_STEPS,
 )
 from .credentials import (
@@ -50,7 +51,14 @@ from .credentials import (
     normalize_uuid,
     with_access_token,
 )
-from .keys import KEY_POWER, KEY_SOURCE, KEY_VOLUMEDOWN, KEY_VOLUMEUP, normalize_key
+from .keys import (
+    KEY_MUTE,
+    KEY_POWER,
+    KEY_SOURCE,
+    KEY_VOLUMEDOWN,
+    KEY_VOLUMEUP,
+    normalize_key,
+)
 from .local_http import (
     capture_screen,
     is_android_package,
@@ -160,7 +168,16 @@ _VOLUME_KEYS = (
     "current_volume",
     "currentVolume",
 )
-_VOLUME_WRAP_KEYS = ("data", "result", "payload", "volumeinfo", "volumeInfo")
+_VOLUME_WRAP_KEYS = (
+    "data",
+    "result",
+    "payload",
+    "volumeinfo",
+    "volumeInfo",
+    "infoPackage",
+)
+# VIDAA volume_type 0 = TV speakers, 1 = HDMI ARC/eARC. Both are the level.
+_VOLUME_LEVEL_TYPES = {VOLUME_TYPE_TV, VOLUME_TYPE_ARC}
 
 
 def _mute_flag(value: Any) -> bool | None:
@@ -189,9 +206,32 @@ def _volume_level(value: Any) -> int | None:
             number = float(text)
         except ValueError:
             return None
-    if 0 < number <= 1:
+    # VIDAA is 0–100. Scale a 0–1 float (HA style); integer 1 is 1%, not 100%.
+    if 0 < number < 1:
         number *= 100.0
+    elif number == 1 and isinstance(value, float):
+        number = 100.0
     return max(0, min(100, int(round(number))))
+
+
+def _payload_has_volume(data: Any) -> bool:
+    if isinstance(data, (int, float)) and not isinstance(data, bool):
+        return True
+    if isinstance(data, str) and _volume_level(data) is not None:
+        return True
+    if isinstance(data, list) and data:
+        return _payload_has_volume(data[0])
+    if not isinstance(data, dict):
+        return False
+    if "volume_type" in data or "volumeType" in data:
+        return True
+    if any(key in data for key in _VOLUME_KEYS + _MUTE_KEYS):
+        return True
+    for wrap in _VOLUME_WRAP_KEYS + ("curAppInfo",):
+        inner = data.get(wrap)
+        if inner is not None and inner is not data and _payload_has_volume(inner):
+            return True
+    return False
 
 
 def _unwrap_volume(data: Any) -> Any:
@@ -318,6 +358,7 @@ class HisenseTvClient:
         self._offline_timer: threading.Timer | None = None
         self._offline_lock = threading.Lock()
         self._seen_volume_topics: set[str] = set()
+        self._last_volume_log: tuple[Any, ...] | None = None
 
     @property
     def creds(self) -> MqttCredentials | None:
@@ -352,15 +393,19 @@ class HisenseTvClient:
 
     def _note_volume_topic(self, topic: str) -> None:
         self.state.volume_topic = topic
-        if topic in self._seen_volume_topics:
+        snapshot = (self.state.volume, self.state.volume_type, self.state.muted, topic)
+        if snapshot == self._last_volume_log:
             return
+        first = topic not in self._seen_volume_topics
         self._seen_volume_topics.add(topic)
+        self._last_volume_log = snapshot
         _LOGGER.info(
-            "MQTT volume from %s: volume=%s type=%s muted=%s",
+            "MQTT volume from %s: volume=%s type=%s muted=%s%s",
             topic,
             self.state.volume,
             self.state.volume_type,
             self.state.muted,
+            " (first)" if first else "",
         )
 
     def _apply_volume(self, data: Any, *, topic: str | None = None) -> None:
@@ -393,19 +438,25 @@ class HisenseTvClient:
             if key in payload and payload[key] is not None:
                 raw_value = payload[key]
                 break
-        # sehaas: type 2 + 0/1 is mute. CaptainSolidus: type 0/1/2 = TV/ARC/BT level.
+        # sehaas/pyvidaa ignore type 1 (eARC). This E7N is eARC: type 0 and 1
+        # are the current level. Type 2 + 0/1 is mute (OSD / 爱家).
         type2_flag = _mute_flag(raw_value) if volume_type == VOLUME_TYPE_MUTE else None
-        if volume_type == VOLUME_TYPE_MUTE and type2_flag is not None and mute is None:
+        if volume_type == VOLUME_TYPE_MUTE:
             self.state.volume_type = VOLUME_TYPE_MUTE
-            self.state.muted = type2_flag
+            if mute is not None:
+                self.state.muted = mute
+            elif type2_flag is not None:
+                self.state.muted = type2_flag
             if topic:
                 self._note_volume_topic(topic)
             return
         if volume_type is not None:
             self.state.volume_type = volume_type
-        level = _volume_level(raw_value)
-        if level is not None:
-            self.state.volume = level
+        level = None
+        if volume_type in _VOLUME_LEVEL_TYPES or volume_type is None:
+            level = _volume_level(raw_value)
+            if level is not None:
+                self.state.volume = level
         if mute is not None:
             self.state.muted = mute
         if topic and (level is not None or mute is not None or volume_type is not None):
@@ -433,8 +484,9 @@ class HisenseTvClient:
         if raw_type is not None and str(raw_type).strip() != "":
             label = str(raw_type)
         elif isinstance(raw_state, str) and raw_state.strip():
-            # Numeric ``state`` flags (0/1) are not a power statetype.
-            label = raw_state
+            # Numeric ``state`` flags (0/1) are OSD/power bits, not statetype.
+            if not raw_state.strip().lstrip("-").isdigit():
+                label = raw_state
         name = data.get("sourcename") or data.get("source_name") or data.get("displayname")
         sid = data.get("sourceid") or data.get("source_id")
         if name:
@@ -454,7 +506,7 @@ class HisenseTvClient:
             }
             if kind == "livetv":
                 self.state.source_name = data.get("channel_name") or name or "TV"
-        self._apply_volume(data, topic=topic)
+        self._apply_volume_tree(data, topic=topic)
         self._maybe_learn_tv_mac(data)
 
     def _maybe_learn_tv_mac(self, data: Any) -> None:
@@ -537,7 +589,9 @@ class HisenseTvClient:
         elif "applist" in topic:
             self._apply_apps(data)
         elif "volume" in topic:
-            self._apply_volume(data, topic=topic)
+            self._apply_volume_tree(data, topic=topic)
+        elif _payload_has_volume(data):
+            self._apply_volume_tree(data, topic=topic)
         self._notify()
 
     def _on_connect(self, client: mqtt.Client, userdata: Any, flags: Any, reason_code: Any, properties: Any = None) -> None:
@@ -559,11 +613,10 @@ class HisenseTvClient:
                 client.subscribe(topic, qos=0)
         self._set_loop_event(self._connected_event)
         self._notify()
-        # getvolume reply is often the only way this firmware reports level/mute.
         # Skip while the PIN dialog is up — status queries can dismiss it.
         if not self.state.needs_pin and not self.state.pin_requested:
             try:
-                self.refresh_status()
+                self.refresh_volume_state()
             except (ConnectionError, RuntimeError, OSError):
                 _LOGGER.debug("gettvstate/getvolume after CONNECT failed", exc_info=True)
 
@@ -895,6 +948,8 @@ class HisenseTvClient:
         status = send_local_key(self.host, name)
         if status is not None and 200 <= status < 300:
             self._note_remoter_ok()
+            if name == KEY_MUTE:
+                self.refresh_volume_state()
             return
         if not self.mqtt_connected:
             _LOGGER.info(
@@ -907,6 +962,8 @@ class HisenseTvClient:
             )
         _LOGGER.info("HTTP remote did not take %s (status %s); trying MQTT", name, status)
         self._publish_action("remote_service", "sendkey", key, as_key=True)
+        if name == KEY_MUTE:
+            self.refresh_volume_state()
 
     def submit_code(self, code: str) -> None:
         """Send the 4 digits shown on the TV after vidaa_app_connect."""
@@ -1108,7 +1165,7 @@ class HisenseTvClient:
         1. Wait ``VOLUME_CEC_GAP`` since the last KEY (0.9s).
         2. Deliver **one** ``KEY_VOLUME*`` via LAN remoter (7778/7779).
         3. Never MQTT ``sendkey`` / ``changevolume`` on this path.
-        4. After a successful KEY, ask ``getvolume`` so HA can show the level.
+        4. After a successful KEY, ask ``gettvstate`` + ``getvolume`` (OSD).
         """
         name = normalize_key(key)
         if name not in {KEY_VOLUMEUP, KEY_VOLUMEDOWN}:
@@ -1137,7 +1194,7 @@ class HisenseTvClient:
             if delivered:
                 self._note_volume_delta(delta)
         if delivered:
-            self.refresh_volume()
+            self.refresh_volume_state()
         return delivered
 
     def _press_volume_key(
@@ -1286,9 +1343,16 @@ class HisenseTvClient:
         except (ConnectionError, RuntimeError):
             _LOGGER.debug("getvolume failed", exc_info=True)
 
-    def refresh_status(self) -> None:
-        self._publish_action("ui_service", "gettvstate", "")
+    def refresh_volume_state(self) -> None:
+        """Poll gettvstate + getvolume. Do not send applist on this path."""
+        try:
+            self._publish_action("ui_service", "gettvstate", "")
+        except (ConnectionError, RuntimeError):
+            _LOGGER.debug("gettvstate failed", exc_info=True)
         self.refresh_volume()
+
+    def refresh_status(self) -> None:
+        self.refresh_volume_state()
         self.refresh_apps()
 
     def _refresh_control_password(self) -> None:
@@ -1452,4 +1516,3 @@ class HisenseTvClient:
         await self.async_send_key("KEY_MUTE")
         self.state.muted = not bool(self.state.muted)
         self._notify()
-        await asyncio.get_running_loop().run_in_executor(None, self.refresh_volume)
