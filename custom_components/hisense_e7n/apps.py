@@ -63,6 +63,11 @@ _LIST_KEYS = _MY_APP_KEYS + (
     "columnList",
     "tileList",
     "tiles",
+    "itemList",
+    "resourceList",
+    "contents",
+    "records",
+    "result",
 )
 _NESTED_LIST_KEYS = (
     "appList",
@@ -75,6 +80,11 @@ _NESTED_LIST_KEYS = (
     "tiles",
     "tileList",
     "resources",
+    "itemList",
+    "resourceList",
+    "contents",
+    "records",
+    "result",
 )
 # 热门/推荐 are the store rows next to 我的应用, not the installed set.
 _OTHER_GROUPS = {"recommend", "hot", "store", "banner", "ad", "推荐", "热门", "应用推荐"}

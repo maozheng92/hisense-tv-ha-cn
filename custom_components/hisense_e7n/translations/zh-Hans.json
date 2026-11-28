@@ -154,7 +154,7 @@
       },
       "account": {
         "title": "爱家账号",
-        "description": "当前账号 {aijia}。账号留空并提交即退出登录。密码不会保存。",
+        "description": "当前账号 {aijia}。提交后令牌立刻生效，「我的应用」不必等选项菜单里的「保存」。账号留空并提交即退出登录。密码不会保存。",
         "data": {
           "aijia_username": "手机号 / 爱家账号",
           "aijia_password": "密码"

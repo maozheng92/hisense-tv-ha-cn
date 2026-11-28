@@ -108,6 +108,15 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
     def aijia_logged_in(self) -> bool:
         return bool(self.aijia and self.aijia.logged_in)
 
+    def sync_aijia_from_entry(self) -> None:
+        """Reload 爱家 tokens from the config entry (options login persists immediately)."""
+        entry = self.config_entry
+        if entry is None:
+            return
+        tokens = tokens_from_entry({**entry.data, **(entry.options or {})})
+        if tokens is not None and tokens.logged_in:
+            self.aijia = tokens
+
     @property
     def tv(self) -> TvState:
         return self.data or self.client.state
@@ -294,6 +303,7 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
 
     async def async_refresh_apps(self, wait: float = 3.0) -> None:
         """Load 我的应用 from 爱家云 when logged in; otherwise probe VIDAA MQTT."""
+        self.sync_aijia_from_entry()
         if self.aijia_logged_in:
             try:
                 await self.async_refresh_aijia_apps()
@@ -305,6 +315,7 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
 
     async def async_refresh_aijia_apps(self) -> None:
         """Fetch 爱家栏目 and apply the installed-app tiles."""
+        self.sync_aijia_from_entry()
         tokens = self.aijia
         if tokens is None or not tokens.logged_in:
             return

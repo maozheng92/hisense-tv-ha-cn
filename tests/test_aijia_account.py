@@ -197,6 +197,69 @@ def test_async_login_and_fetch_apps_from_device_state() -> None:
     asyncio.run(_run())
 
 
+def test_signed_headers_include_token_when_given() -> None:
+    account = _account()
+    headers = account.signed_headers("{}", "tok-1")
+    assert headers["Authorization"] == "tok-1"
+    assert headers["accessToken"] == "tok-1"
+
+
+def test_parse_login_accepts_0000_result_code() -> None:
+    account = _account()
+    tokens = account.parse_login(
+        {
+            "data": {
+                "resultCode": "0000",
+                "customerId": "cust-2",
+                "token": "tok-2",
+                "refreshToken": "ref-2",
+            }
+        }
+    )
+    assert tokens.access_token == "tok-2"
+    assert tokens.customer_id == "cust-2"
+
+
+def test_pick_tv_matches_nested_ip() -> None:
+    account = _account()
+    tv = {
+        "deviceId": "tv-nested",
+        "wifiInfo": {"ip": "192.168.1.8"},
+        "product": {"name": "空调"},
+    }
+    picked = account.pick_tv_device([tv], host="192.168.1.8")
+    assert picked is not None
+    assert picked["deviceId"] == "tv-nested"
+
+
+def test_fetch_apps_uses_columns_when_iot_forbidden() -> None:
+    account = _account()
+    session = FakeSession(
+        {
+            "/4.0/iot/home/list": (403, {"error": "no"}),
+            "/4.0/iot/devices/list": (403, {"error": "no"}),
+            "/api/columns": {
+                "mqttAppNameList": [
+                    {
+                        "name": "云视听极光",
+                        "packageName": "com.ktcp.video",
+                        "isLocalApp": 1,
+                    }
+                ]
+            },
+        }
+    )
+
+    async def _run():
+        tokens = account.AijiaTokens(access_token="tok", customer_id="c1")
+        updated, apps = await account.async_fetch_apps(session, tokens)
+        assert [item["name"] for item in apps] == ["云视听极光"]
+        assert apps[0]["package"] == "com.ktcp.video"
+        assert updated.access_token == "tok"
+
+    asyncio.run(_run())
+
+
 def test_parse_login_rejects_bad_password() -> None:
     account = _account()
     try:

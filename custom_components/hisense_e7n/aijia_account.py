@@ -40,6 +40,7 @@ DEVICE_INFO_URL = "https://mobile-aiot.hismarttv.com/mobiletv/device/deviceInfo"
 HOMEPAGE_LAYOUT = "/4.0/iot/layout/smartHomeApp/common"
 TOKEN_TTL_DEFAULT = 259200.0
 _TV_HINTS = ("电视", "tv", "vidaa", "hisense tv", "smarttv", "smart tv")
+_LOGIN_OK = {"0", "0.0", "00", "0000", "200", "success", "SUCCESS"}
 
 
 class AijiaError(Exception):
@@ -131,8 +132,8 @@ def encrypt_portal(value: str) -> str:
     return base64.b64encode(encrypted).decode("ascii")
 
 
-def signed_headers(body: str) -> dict[str, str]:
-    return {
+def signed_headers(body: str, access_token: str = "") -> dict[str, str]:
+    headers = {
         "Content-Type": "application/json; charset=UTF-8",
         "Accept": "application/json",
         "User-Agent": "okhttp/4.10.0",
@@ -141,6 +142,11 @@ def signed_headers(body: str) -> dict[str, str]:
         "X-Platform": "android",
         "X-Terminal-Version": APP_VERSION,
     }
+    token = (access_token or "").strip()
+    if token:
+        headers["accessToken"] = token
+        headers["Authorization"] = token
+    return headers
 
 
 def parse_login(result: Any) -> AijiaTokens:
@@ -149,12 +155,22 @@ def parse_login(result: Any) -> AijiaTokens:
     data = result.get("data") if isinstance(result.get("data"), dict) else result
     if not isinstance(data, dict):
         raise AijiaAuthError("登录响应缺少 data")
-    if str(data.get("resultCode", "0")) not in {"0", "0.0"}:
+    if str(data.get("resultCode", "0")) not in _LOGIN_OK:
         raise AijiaAuthError(str(data.get("errorDesc") or data.get("message") or "登录失败"))
     info = data.get("tokenInfo") if isinstance(data.get("tokenInfo"), dict) else data
-    token = str(info.get("token") or info.get("accessToken") or "").strip()
+    token = str(
+        info.get("token")
+        or info.get("accessToken")
+        or data.get("token")
+        or data.get("accessToken")
+        or ""
+    ).strip()
     customer = str(
-        info.get("customerId") or data.get("customerId") or result.get("customerId") or ""
+        info.get("customerId")
+        or data.get("customerId")
+        or result.get("customerId")
+        or info.get("customerID")
+        or ""
     ).strip()
     if not token or not customer:
         raise AijiaAuthError("登录未返回 token / customerId")
@@ -174,7 +190,7 @@ def parse_refresh(result: Any) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise AijiaAuthError("续期响应无效")
     data = result.get("data") if isinstance(result.get("data"), dict) else result
-    if str(data.get("resultCode", "0")) not in {"0", "0.0"} or not data.get("token"):
+    if str(data.get("resultCode", "0")) not in _LOGIN_OK or not data.get("token"):
         raise AijiaAuthError("令牌续期失败")
     return data
 
@@ -354,22 +370,58 @@ async def async_fetch_apps(
 ) -> tuple[AijiaTokens, list[dict[str, Any]]]:
     """Login-state fetch of 我的应用. Returns updated tokens and app rows."""
     current = await async_ensure_token(session, tokens)
-    devices = await async_list_devices(session, current)
+    devices: list[dict[str, Any]] = []
+    try:
+        devices = await async_list_devices(session, current)
+    except AijiaError as err:
+        _LOGGER.warning("爱家设备列表失败，改走栏目: %s", err)
     tv = pick_tv_device(
         devices, host=host, mac=mac, device_id=current.device_id or None
     )
+    ordered: list[dict[str, Any]] = []
+    if tv is not None:
+        ordered.append(tv)
+    for item in devices:
+        if item is not tv:
+            ordered.append(item)
+    for item in ordered:
+        from_device = extract_cloud_apps(item)
+        if from_device:
+            current = replace(
+                current, device_id=str(item.get("deviceId") or current.device_id)
+            )
+            _LOGGER.info(
+                "爱家从设备 %s 解析到 %s 个应用", current.device_id, len(from_device)
+            )
+            return current, from_device
     if tv is not None:
         current = replace(current, device_id=str(tv.get("deviceId") or current.device_id))
-        from_device = extract_cloud_apps(tv)
-        if from_device:
-            return current, from_device
+    device_ids: list[str] = []
     if current.device_id:
-        current = await _try_tv_login_id(session, current)
-    apps: list[dict[str, Any]] = []
-    for candidate in await _column_candidates(session, current):
-        apps = extract_cloud_apps(candidate)
-        if apps:
-            return current, apps
+        device_ids.append(current.device_id)
+    for item in ordered:
+        did = str(item.get("deviceId") or "").strip()
+        if did and did not in device_ids:
+            device_ids.append(did)
+        if len(device_ids) >= 3:
+            break
+    if not device_ids:
+        device_ids.append("")
+    for did in device_ids:
+        trial = replace(current, device_id=did) if did else current
+        if trial.device_id:
+            trial = await _try_tv_login_id(session, trial)
+        for candidate in await _column_candidates(session, trial):
+            apps = extract_cloud_apps(candidate)
+            if apps:
+                _LOGGER.info(
+                    "爱家栏目解析到 %s 个应用 (deviceId=%s)",
+                    len(apps),
+                    trial.device_id,
+                )
+                return trial, apps
+        current = trial
+    _LOGGER.warning("爱家已登录但未解析到我的应用 (devices=%s)", len(devices))
     return current, []
 
 
@@ -412,7 +464,11 @@ async def _try_tv_login_id(session: Any, tokens: AijiaTokens) -> AijiaTokens:
     )
     try:
         status, result = await _request_json(
-            session, "POST", TV_TOKEN_URL, headers=signed_headers(body), data=body
+            session,
+            "POST",
+            TV_TOKEN_URL,
+            headers=signed_headers(body, tokens.access_token),
+            data=body,
         )
     except AijiaError:
         return tokens
@@ -441,7 +497,11 @@ async def _column_candidates(session: Any, tokens: AijiaTokens) -> list[Any]:
     for url in urls:
         try:
             status, result = await _request_json(
-                session, "POST", url, headers=signed_headers(body), data=body
+                session,
+                "POST",
+                url,
+                headers=signed_headers(body, tokens.access_token),
+                data=body,
             )
         except AijiaError as err:
             _LOGGER.debug("爱家栏目 POST %s failed: %s", url, err)
@@ -459,7 +519,11 @@ async def _column_candidates(session: Any, tokens: AijiaTokens) -> list[Any]:
         params = {key: value for key, value in params.items() if value}
         try:
             status, result = await _request_json(
-                session, "GET", url, headers=signed_headers(compact_json(params)), params=params
+                session,
+                "GET",
+                url,
+                headers=signed_headers(compact_json(params), tokens.access_token),
+                params=params,
             )
         except AijiaError as err:
             _LOGGER.debug("爱家栏目 GET %s failed: %s", url, err)
@@ -511,7 +575,7 @@ async def _iot_post(
                 session,
                 "POST",
                 f"{IOT_BASE}{path}",
-                headers=signed_headers(raw),
+                headers=signed_headers(raw, tokens.access_token),
                 data=raw,
             )
         except AijiaError as err:
@@ -527,8 +591,9 @@ async def _iot_post(
             return result
         errors.append(f"HTTP {status}")
     if denied:
-        raise AijiaAuthError("爱家 IoT 拒绝了令牌")
-    _LOGGER.debug("爱家 IoT %s 未成功: %s", path, "; ".join(errors))
+        _LOGGER.warning("爱家 IoT %s 返回 401/403，改走栏目接口", path)
+    else:
+        _LOGGER.debug("爱家 IoT %s 未成功: %s", path, "; ".join(errors))
     return {}
 
 
@@ -626,7 +691,19 @@ def _collect_names_and_tiles(data: Any) -> tuple[list[str], list[Any]]:
                         if label:
                             names.append(label)
                         tiles.append(item)
-            for key in ("tiles", "tileList", "tile", "resources"):
+            for key in (
+                "tiles",
+                "tileList",
+                "tile",
+                "resources",
+                "itemList",
+                "resourceList",
+                "contents",
+                "records",
+                "appInfo",
+                "appInfoList",
+                "columnList",
+            ):
                 value = node.get(key)
                 if isinstance(value, list):
                     tiles.extend(item for item in value if isinstance(item, (dict, str)))
@@ -666,11 +743,16 @@ def _mac_in_device(item: dict[str, Any], mac: str) -> bool:
 
 
 def _host_in_device(item: dict[str, Any], host: str) -> bool:
+    wanted = (host or "").strip()
+    if not wanted:
+        return False
     for key in ("ip", "lanIp", "deviceIp", "wifiIp", "localIp"):
-        if str(item.get(key) or "").strip() == host:
+        if str(item.get(key) or "").strip() == wanted:
             return True
     parsed = urlparse(str(item.get("deviceUrl") or item.get("url") or ""))
-    return parsed.hostname == host
+    if parsed.hostname == wanted:
+        return True
+    return wanted in json.dumps(item, ensure_ascii=False)
 
 
 def _timestamp() -> int:

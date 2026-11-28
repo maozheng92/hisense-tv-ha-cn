@@ -265,8 +265,6 @@ async def _async_bind_aijia(
         raise AijiaAuthError("请填写爱家手机号和密码")
     try:
         tokens, _apps = await async_fetch_apps(session, tokens, host=host, mac=mac or None)
-    except AijiaAuthError:
-        raise
     except AijiaError as err:
         _LOGGER.warning("爱家已登录，但拉取我的应用失败: %s", err)
     return tokens
@@ -755,11 +753,31 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
 
     def _persist_aijia_entry_data(self) -> None:
         entry = self._entry()
-        payload = _aijia_fields(tokens_from_entry(self._data))
-        payload[CONF_AIJIA_USERNAME] = str(self._data.get(CONF_AIJIA_USERNAME) or "").strip()
-        if not payload[CONF_AIJIA_USERNAME]:
-            payload = empty_entry_fields()
+        tokens = tokens_from_entry(self._data)
+        payload = _aijia_fields(tokens)
+        username = str(
+            self._data.get(CONF_AIJIA_USERNAME)
+            or (tokens.username if tokens else "")
+            or ""
+        ).strip()
+        payload[CONF_AIJIA_USERNAME] = username
         self.hass.config_entries.async_update_entry(entry, data={**entry.data, **payload})
+
+    async def _async_commit_aijia_session(self) -> None:
+        """Write tokens now so 浏览媒体 works before the options Save."""
+        self._persist_aijia_entry_data()
+        entry = self._entry()
+        try:
+            from .hub import hub_from_entry
+
+            hub = hub_from_entry(self.hass, entry)
+        except (AttributeError, KeyError):
+            return
+        hub.configure_aijia({**entry.data, **self._data})
+        try:
+            await hub.async_refresh_aijia_apps()
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("登录后刷新爱家「我的应用」失败", exc_info=True)
 
     async def async_step_connection(
         self, user_input: dict[str, Any] | None = None
@@ -935,17 +953,22 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
         if user_input is not None:
             if self._wants_back(user_input):
                 return await self.async_step_init()
-            username = str(user_input.get(CONF_AIJIA_USERNAME) or "").strip()
+            if CONF_AIJIA_USERNAME in user_input:
+                username = str(user_input.get(CONF_AIJIA_USERNAME) or "").strip()
+            else:
+                username = str(self._data.get(CONF_AIJIA_USERNAME) or "").strip()
             password = str(user_input.get(CONF_AIJIA_PASSWORD) or "")
             if not username:
                 self._data.update(empty_entry_fields())
                 self._data[CONF_AIJIA_USERNAME] = ""
+                await self._async_commit_aijia_session()
                 return await self.async_step_init()
             existing = tokens_from_entry(self._data)
             if not password and existing and existing.logged_in:
                 existing.username = username
                 self._data.update(_aijia_fields(existing))
                 self._data[CONF_AIJIA_USERNAME] = username
+                await self._async_commit_aijia_session()
                 return await self.async_step_init()
             try:
                 tokens = await _async_bind_aijia(
@@ -963,6 +986,7 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
             else:
                 self._data.update(_aijia_fields(tokens))
                 self._data[CONF_AIJIA_USERNAME] = tokens.username or username
+                await self._async_commit_aijia_session()
                 return await self.async_step_init()
         return self._show_form(
             "account",

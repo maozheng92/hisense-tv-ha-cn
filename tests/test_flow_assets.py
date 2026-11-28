@@ -140,9 +140,9 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_25_1() -> None:
+def test_version_is_1_25_2() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.25.1"
+    assert manifest["version"] == "1.25.2"
     assert not (_ROOT / "www").exists()
     assert not (_ROOT / "select.py").exists()
 
@@ -153,6 +153,18 @@ def test_browse_media_is_always_advertised() -> None:
     assert "MediaPlayerEntityFeature.BROWSE_MEDIA" in base
     features = text.split("def supported_features", 1)[1].split("def state", 1)[0]
     assert "hub.tv.apps" not in features
+    placeholder = text.split("def _apps_placeholder", 1)[1].split("def _app_item", 1)[0]
+    assert "MediaClass.DIRECTORY" in placeholder
+    assert "MediaType.APPS" in placeholder
+    assert "can_play=True" not in placeholder
+    assert "apps-refresh" in placeholder
+    flow = (_ROOT / "config_flow.py").read_text(encoding="utf-8")
+    assert "async def _async_commit_aijia_session" in flow
+    play = text.split("async def async_play_media", 1)[1].split(
+        "async def async_browse_media", 1
+    )[0]
+    assert "_apps_empty_message" in play
+    assert 'media_id == "aijia-login"' not in play
 
 
 def test_sources_menu_save_is_footer_not_row() -> None:
