@@ -1,7 +1,10 @@
 """VIDAA ``/remoteapp/`` topic helpers.
 
-Wildcards are unreliable on some firmware, so the client subscribes
-to the concrete topics listed here.
+This TV's broker appears to cap how many concrete subscriptions it
+keeps. 1.23.9 added many volume topics and the volume OSD on
+``broadcast/ui_service/state`` stopped arriving. Subscribe
+``/remoteapp/#`` first (pyvidaa confirmed the TV grants it), then the
+broadcasts that actually carry volume, then unicast replies.
 """
 
 from __future__ import annotations
@@ -103,40 +106,45 @@ _MOBILE_DATA = (
     ("platform_service", "tokenissuance"),
 )
 
+_WILDCARDS = (
+    "/remoteapp/#",
+)
+
 _BROADCASTS = (
     "/remoteapp/mobile/broadcast/ui_service/state",
     "/remoteapp/mobile/broadcast/ui_service/data/state",
-    "/remoteapp/mobile/broadcast/ui_service/data/applist",
+    "/remoteapp/mobile/broadcast/platform_service/actions/volumechange",
+    "/remoteapp/mobile/broadcast/platform_service/data/volumechange",
     "/remoteapp/mobile/broadcast/ui_service/volume",
     "/remoteapp/mobile/broadcast/ui_service/data/volume",
-    "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep",
-    "/remoteapp/mobile/broadcast/platform_service/data/volumechange",
-    "/remoteapp/mobile/broadcast/platform_service/actions/volumechange",
     "/remoteapp/mobile/broadcast/platform_service/volume",
     "/remoteapp/mobile/broadcast/platform_service/data/volume",
     "/remoteapp/mobile/broadcast/platform_service/data/getvolume",
+    "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep",
+    "/remoteapp/mobile/broadcast/ui_service/data/applist",
 )
 
 
 def subscription_topics(creds: MqttCredentials, tv_mac: str | None = None) -> list[str]:
     topics: list[str] = []
     seen: set[str] = set()
-    for ident in command_identities(creds, tv_mac):
-        for service, data_type in _MOBILE_DATA:
-            topic = f"/remoteapp/mobile/{ident}/{service}/data/{data_type}"
-            if topic not in seen:
-                seen.add(topic)
-                topics.append(topic)
-        # Some firmware answers gettvstate / OSD on these, not /data/*.
-        for topic in (
-            f"/remoteapp/mobile/{ident}/ui_service/state",
-            f"/remoteapp/mobile/{ident}/ui_service/volume",
-            f"/remoteapp/mobile/{ident}/platform_service/actions/volumechange",
-        ):
-            if topic not in seen:
-                seen.add(topic)
-                topics.append(topic)
-    for topic in _BROADCASTS:
-        if topic not in seen:
+
+    def _add(topic: str) -> None:
+        if topic and topic not in seen:
+            seen.add(topic)
             topics.append(topic)
+
+    for topic in _WILDCARDS:
+        _add(topic)
+    for topic in _BROADCASTS:
+        _add(topic)
+    for ident in command_identities(creds, tv_mac):
+        _add(f"/remoteapp/mobile/{ident}/ui_service/state")
+        _add(f"/remoteapp/mobile/{ident}/ui_service/data/state")
+        _add(f"/remoteapp/mobile/{ident}/ui_service/volume")
+        _add(f"/remoteapp/mobile/{ident}/platform_service/data/volume")
+        _add(f"/remoteapp/mobile/{ident}/platform_service/actions/volumechange")
+        _add(f"/remoteapp/mobile/{ident}/platform_service/data/volumechange")
+        for service, data_type in _MOBILE_DATA:
+            _add(f"/remoteapp/mobile/{ident}/{service}/data/{data_type}")
     return topics

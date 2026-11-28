@@ -124,6 +124,19 @@ def test_offline_hides_mute(proto_client) -> None:
     assert client.state.media_is_volume_muted() is None
 
 
+def test_volume_on_unexpected_topic_is_still_parsed(proto_client) -> None:
+    """Wildcard /remoteapp/# delivers topics we never listed explicitly."""
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    client._handle_message(
+        "/remoteapp/mobile/broadcast/platform_service/data/soundinfo",
+        b'{"volume_value": 27, "volume_type": 1, "mute_status": 0}',
+    )
+    assert client.state.media_volume_level() == 0.27
+    assert client.state.volume_type == 1
+    assert client.state.media_is_volume_muted() is False
+
+
 def test_refresh_volume_state_does_not_applist(
     proto_client, proto_credentials
 ) -> None:

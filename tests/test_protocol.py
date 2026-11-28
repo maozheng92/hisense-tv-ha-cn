@@ -80,7 +80,8 @@ def test_pair_topic_and_subscriptions_are_concrete(proto_client, proto_credentia
     assert proto_client.CONNECT_PAYLOAD["device_type"] == "Mobile App"
     assert proto_topics.vidaa_app_connect(creds).endswith("/actions/vidaa_app_connect")
     subs = proto_topics.subscription_topics(creds)
-    assert not any(item.endswith("#") or "/+" in item for item in subs)
+    assert subs[0] == "/remoteapp/#"
+    assert subs[1] == "/remoteapp/mobile/broadcast/ui_service/state"
     assert "/remoteapp/mobile/broadcast/ui_service/state" in subs
     assert "/remoteapp/mobile/broadcast/ui_service/data/state" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep" in subs
@@ -473,6 +474,7 @@ def test_on_connect_requests_getvolume(proto_client, proto_credentials) -> None:
     mqtt_client = FakeMqtt()
     client._client = mqtt_client
     client._on_connect(mqtt_client, None, {}, 0)
+    assert subscribed[0] == "/remoteapp/#"
     assert any(
         creds.client_id in topic and topic.endswith("/data/volumechange")
         for topic in subscribed

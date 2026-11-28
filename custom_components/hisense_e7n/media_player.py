@@ -94,6 +94,7 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
     _attr_name = None
     _attr_icon = "mdi:television"
     _attr_translation_key = "tv"
+    _attr_supported_features = _BASE_SUPPORT
 
     def __init__(self, hub: HisenseTvHub, entry: ConfigEntry) -> None:
         super().__init__(hub, entry)

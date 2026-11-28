@@ -120,7 +120,7 @@ data:
 
 ## 音量与静音状态
 
-这台 E7N 在 HA 日志里**没有**出现过 `platform_service/…/volumechange`。音量 OSD 时会发部分 `ui_service/state`：`{"volume_value":18,"volume_type":1,"state":1}`。1.23.11 把 **type 0 和 1** 都接到 `media_player.volume_level`（0–1）；type 2 或 `mute_status` 接到 `is_volume_muted`。完整 `gettvstate` 若把音量放在 `infoPackage` 里也会解析。开机、音量键、静音后，以及开机时每 3 秒轮询 `gettvstate` + `getvolume`（不轮询 applist；PIN 对话框期间不轮询）。截屏元数据里若带 `volume_value` / `mute_status` 也会写入。
+这台 E7N 在 HA 日志里**没有**出现过 `platform_service/…/volumechange`。音量 OSD 时会发部分 `ui_service/state`：`{"volume_value":18,"volume_type":1,"state":1}`。1.23.12 先订 **`/remoteapp/#`**（避免订阅条数上限丢掉广播），再解析 **type 0 和 1** 为 `volume_level`，type 2 / `mute_status` 为静音。完整 `gettvstate` 若把音量放在 `infoPackage` 里也会解析。开机、音量键、静音后，以及开机时每 3 秒轮询 `gettvstate` + `getvolume`。每个新 MQTT 主题会打一条 `MQTT … <-` 日志。
 
 `volume_type=1` 是 HDMI ARC/eARC 的 CEC 音量（公共集成会丢掉这一路）。`volume_type=2` 且值为 0/1 是静音。加减仍发本机 `KEY_VOLUME*`，静音仍发 `KEY_MUTE`。实体属性 `volume_topic` 和日志 `MQTT volume from …` 标明实际进站主题。
 

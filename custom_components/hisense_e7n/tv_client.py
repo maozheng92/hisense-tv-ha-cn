@@ -358,6 +358,7 @@ class HisenseTvClient:
         self._offline_timer: threading.Timer | None = None
         self._offline_lock = threading.Lock()
         self._seen_volume_topics: set[str] = set()
+        self._seen_mqtt_topics: set[str] = set()
         self._last_volume_log: tuple[Any, ...] | None = None
 
     @property
@@ -473,8 +474,18 @@ class HisenseTvClient:
                 self._apply_volume_tree(inner, topic=topic)
 
     def _apply_state(self, data: Any, *, topic: str | None = None) -> None:
+        if isinstance(data, list):
+            for item in data:
+                self._apply_state(item, topic=topic)
+            return
         if not isinstance(data, dict):
+            if isinstance(data, (int, float)) and not isinstance(data, bool):
+                self._apply_volume(data, topic=topic)
+                return
             if isinstance(data, str) and data:
+                if _volume_level(data) is not None:
+                    self._apply_volume(data, topic=topic)
+                    return
                 self.state.statetype = data
                 self.state.power_on = True
             return
@@ -549,7 +560,11 @@ class HisenseTvClient:
 
     def _handle_message(self, topic: str, payload: bytes) -> None:
         data = _loads(payload)
-        _LOGGER.debug("MQTT %s <- %s", topic, data)
+        if topic not in self._seen_mqtt_topics:
+            self._seen_mqtt_topics.add(topic)
+            _LOGGER.info("MQTT %s <- %s", topic, data)
+        else:
+            _LOGGER.debug("MQTT %s <- %s", topic, data)
         if topic.endswith("/data/authentication") or topic.endswith("/data/authenticationcodetoast"):
             self.state.needs_pin = not self.state.already_paired
             self._set_loop_event(self._pin_event)
@@ -609,8 +624,14 @@ class HisenseTvClient:
         self.state.power_on = True
         self.state.last_error = None
         if self._creds:
-            for topic in topics.subscription_topics(self._creds, self.tv_mac):
+            subscribed = topics.subscription_topics(self._creds, self.tv_mac)
+            for topic in subscribed:
                 client.subscribe(topic, qos=0)
+            _LOGGER.info(
+                "MQTT subscribed %s topics (first %s)",
+                len(subscribed),
+                subscribed[0] if subscribed else "",
+            )
         self._set_loop_event(self._connected_event)
         self._notify()
         # Skip while the PIN dialog is up — status queries can dismiss it.
