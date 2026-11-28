@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import io
+import json
 import urllib.error
+
+import pytest
 
 
 class _Response(io.BytesIO):
@@ -238,24 +241,55 @@ def test_fetch_device_identity_reads_deviceid(proto_local_http, monkeypatch) -> 
     assert seen[0].endswith("/..deviceid")
 
 
-def test_launch_local_app_posts_pushsmartju(proto_local_http, monkeypatch) -> None:
+def test_launch_local_app_starts_via_commonstarttvapp(proto_local_http, monkeypatch) -> None:
     seen: list[tuple[str, bytes | None]] = []
 
     def fake_urlopen(request, timeout=0):
         del timeout
         seen.append((request.full_url, request.data))
+        if request.full_url.endswith(":7779/..commonstarttvapp"):
+            return _Response(200)
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(proto_local_http.urllib.request, "urlopen", fake_urlopen)
+    status = proto_local_http.launch_local_app(
+        "192.0.2.10", "com.jamdeo.tv.mediacenter", timeout=0.1
+    )
+    assert status == 200
+    assert seen[0][0] == "http://192.0.2.10:7779/..commonstarttvapp"
+    body = json.loads(seen[0][1].decode())
+    assert body["packagename"] == "com.jamdeo.tv.mediacenter"
+    assert body["commandtype"] == "1"
+    assert body["action"] == "android.intent.action.MAIN"
+    assert proto_local_http.is_android_package("com.ktcp.video")
+    assert not proto_local_http.is_android_package("netflix")
+
+
+def test_launch_local_app_pushsmartju_adds_launcher_action(
+    proto_local_http, monkeypatch
+) -> None:
+    seen: list[tuple[str, bytes | None]] = []
+
+    def fake_urlopen(request, timeout=0):
+        del timeout
+        seen.append((request.full_url, request.data))
+        if request.full_url.endswith(":7779/..commonstarttvapp"):
+            return _Body(400, b"no")
         if request.full_url.endswith(":7779/..pushsmartju"):
             return _Response(200)
         raise urllib.error.URLError("refused")
 
     monkeypatch.setattr(proto_local_http.urllib.request, "urlopen", fake_urlopen)
-    status = proto_local_http.launch_local_app("192.0.2.10", "com.ktcp.video", timeout=0.1)
+    status = proto_local_http.launch_local_app(
+        "192.0.2.10", "com.android.tv.settings", timeout=0.1
+    )
     assert status == 200
-    assert seen[0][0] == "http://192.0.2.10:7779/..pushsmartju"
-    assert b'"packageName"' in seen[0][1]
-    assert b"com.ktcp.video" in seen[0][1]
-    assert proto_local_http.is_android_package("com.ktcp.video")
-    assert not proto_local_http.is_android_package("netflix")
+    ju = next(body for url, body in seen if url.endswith("/..pushsmartju"))
+    payload = json.loads(ju.decode())
+    keys = {item["key"]: item["value"] for item in payload["startupUrl"]}
+    assert keys["packageName"] == "com.android.tv.settings"
+    assert keys["action"] == "android.intent.action.MAIN"
+    assert keys["category"] == "android.intent.category.LAUNCHER"
 
 
 def test_launch_app_prefers_local_package(proto_client, monkeypatch) -> None:
@@ -311,3 +345,31 @@ def test_launch_app_mqtt_when_local_fails(
     assert '"urlType":37' in body
     assert '"isLocalApp":0' in body
     assert client.state.current_app == "Netflix"
+
+
+def test_launch_app_local_package_skips_mqtt_on_400(
+    proto_client, proto_credentials, monkeypatch
+) -> None:
+    published: list[tuple[str, str]] = []
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    client._creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+
+    class FakeMqtt:
+        def publish(self, topic, payload=None, qos=0, retain=False):
+            published.append((topic, payload))
+
+            class Info:
+                rc = proto_client.mqtt.MQTT_ERR_SUCCESS
+
+                def wait_for_publish(self, timeout=None):
+                    return None
+
+            return Info()
+
+    client._client = FakeMqtt()
+    monkeypatch.setattr(proto_client, "launch_local_app", lambda host, package, **kwargs: 400)
+    with pytest.raises(RuntimeError, match="拒绝打开"):
+        client.launch_app("媒体中心", "com.jamdeo.tv.mediacenter")
+    assert published == []

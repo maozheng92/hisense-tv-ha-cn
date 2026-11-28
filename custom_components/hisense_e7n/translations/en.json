@@ -333,7 +333,7 @@
     },
     "launch_app": {
       "name": "Launch app",
-      "description": "Open by Android package via LAN 电视打开 (/..pushsmartju). After 爱家 login, browse media lists cloud 我的应用.",
+      "description": "Open by Android package via LAN 电视打开 (/..commonstarttvapp, then /..pushsmartju). Packages are not sent to MQTT launchapp. After 爱家 login, browse media lists cloud 我的应用.",
       "fields": {
         "name": {
           "name": "App name",

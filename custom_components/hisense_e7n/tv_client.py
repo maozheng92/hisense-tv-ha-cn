@@ -1173,20 +1173,15 @@ class HisenseTvClient:
                 self.state.current_app = name or pkg
                 self._notify()
                 return
-            _LOGGER.info("Local 电视打开 did not take %s (status %s); trying MQTT", pkg, status)
-            payload = build_launch_payload(
-                matched,
-                name=name or pkg,
-                url=pkg,
-                url_type=0,
-                store_type=store_type,
-                package=pkg,
-                is_local=True,
+            label = name or pkg
+            _LOGGER.warning(
+                "Local 电视打开 did not take %s (status %s); not using MQTT launchapp",
+                pkg,
+                status,
             )
-            self._publish_action("ui_service", "launchapp", payload)
-            self.state.current_app = payload["name"]
-            self._notify()
-            return
+            if status is None:
+                raise RuntimeError(f"电视没有响应打开 {label}")
+            raise RuntimeError(f"电视拒绝打开 {label}（HTTP {status}）")
         payload = build_launch_payload(
             matched,
             name=name,

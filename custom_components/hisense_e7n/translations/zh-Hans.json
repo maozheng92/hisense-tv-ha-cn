@@ -322,7 +322,7 @@
     },
     "launch_app": {
       "name": "打开应用",
-      "description": "按包名走爱家本机「电视打开」（/..pushsmartju）。登录爱家后媒体浏览器会列出云栏目「我的应用」。",
+      "description": "按包名走爱家本机「电视打开」（/..commonstarttvapp，必要时 /..pushsmartju）。Android 包名不会走 MQTT launchapp。登录爱家后媒体浏览器会列出云栏目「我的应用」。",
       "fields": {
         "name": {
           "name": "应用名",

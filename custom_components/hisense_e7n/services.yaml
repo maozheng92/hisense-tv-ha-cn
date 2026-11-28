@@ -35,9 +35,10 @@ send_key:
 launch_app:
   name: Launch app
   description: >
-    Open by Android package the way 爱家 「电视打开」 does on LAN
-    (``/..pushsmartju``). 爱家's 我的应用 *list* is a signed cloud column,
-    not local MQTT. Store URLs still try MQTT ``launchapp``.
+    Open by Android package on LAN (``/..commonstarttvapp``, then
+    ``/..pushsmartju`` with MAIN/LAUNCHER). Do not use MQTT ``launchapp``
+    for packages — the TV treats that as media and shows 播放失败.
+    Store slugs still try MQTT ``launchapp``.
   target:
     entity:
       integration: hisense_e7n
