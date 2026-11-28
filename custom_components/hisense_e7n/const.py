@@ -112,5 +112,5 @@ REMOTE_CLIENT_ID = "HomeAssistant"
 DATA_CLIENT = "client"
 DATA_COORDINATOR = "coordinator"
 # TCL has media_player + remote only. Remoter keys are not button entities.
-PLATFORMS = ("media_player", "remote")
+PLATFORMS = ("media_player", "remote", "select")
 ATTR_HIDDEN = "hidden"

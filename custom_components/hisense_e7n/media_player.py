@@ -36,7 +36,7 @@ try:
 except ImportError:  # pragma: no cover
     ServiceValidationError = HomeAssistantError  # type: ignore[misc,assignment]
 
-from .apps import app_media_id, format_app_title, resolve_app
+from .apps import app_media_id, app_summary, format_app_title, resolve_app
 from .entity import HisenseTvEntity, tv_errors
 from .hub import HisenseTvHub, hub_from_entry
 from .keys import (
@@ -81,6 +81,11 @@ async def async_setup_entry(
             vol.Optional("url"): cv.string,
         },
         "async_launch_app_service",
+    )
+    platform.async_register_entity_service(
+        "refresh_apps",
+        {},
+        "async_refresh_apps_service",
     )
 
 
@@ -132,7 +137,7 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
 
     @property
     def media_title(self) -> str | None:
-        return self.source
+        return self.hub.tv.current_app or self.source
 
     @property
     def source(self) -> str | None:
@@ -197,6 +202,10 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         with tv_errors():
             await self.hub.async_launch_app(name, url)
 
+    async def async_refresh_apps_service(self) -> None:
+        with tv_errors():
+            await self.hub.async_refresh_apps()
+
     async def async_play_media(
         self, media_type: str, media_id: str, **kwargs: Any
     ) -> None:
@@ -206,8 +215,11 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             )
         app = resolve_app(self.hub.tv.apps, media_id)
         if app is None:
+            await self.hub.async_ensure_apps()
+            app = resolve_app(self.hub.tv.apps, media_id)
+        if app is None:
             raise ServiceValidationError(
-                f"Unknown app {media_id!r}; browse Applications on this media player"
+                f"Unknown app {media_id!r}; open 我的应用 on this media player"
             )
         with tv_errors():
             await self.hub.async_launch_resolved_app(app)
@@ -222,8 +234,9 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             or media_content_id in ("", "apps")
             or media_content_type in (MediaType.APPS, "apps")
         ):
+            await self.hub.async_ensure_apps()
             return BrowseMedia(
-                title="Applications",
+                title="我的应用",
                 media_class=MediaClass.APP,
                 media_content_id="apps",
                 media_content_type=MediaType.APPS,
@@ -242,7 +255,9 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             "auth_mode": tv.auth_mode,
             "source_id": tv.source_id,
             "power_on_mode": self.hub.power_on_mode,
+            "current_app": tv.current_app,
             "apps": [format_app_title(app) for app in tv.apps if format_app_title(app)],
+            "installed_apps": [app_summary(app) for app in tv.apps],
             "custom_sources": [
                 {
                     "name": item["name"],

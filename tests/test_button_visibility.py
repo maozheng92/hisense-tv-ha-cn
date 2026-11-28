@@ -39,7 +39,8 @@ def test_no_button_platform_and_legacy_cleanup() -> None:
     button = (root / "button.py").read_text(encoding="utf-8")
     assert "async_remove_legacy_button_entities" in init
     const = (root / "const.py").read_text(encoding="utf-8")
-    assert 'PLATFORMS = ("media_player", "remote")' in const
+    assert 'PLATFORMS = ("media_player", "remote", "select")' in const
+    assert '"button"' not in const.split("PLATFORMS", 1)[1].split("\n", 1)[0]
     assert "async_setup_entry" not in button
     assert "ButtonEntity" not in button
     assert "class " not in button

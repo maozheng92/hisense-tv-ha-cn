@@ -34,7 +34,9 @@ send_key:
 
 launch_app:
   name: Launch app
-  description: Launch an installed VIDAA app by name.
+  description: >
+    Open an app from 爱家 电视应用 → 我的应用. Android packages use LAN
+    「电视打开」 (``/..pushsmartju``); store apps use MQTT ``launchapp``.
   target:
     entity:
       integration: hisense_e7n
@@ -43,12 +45,20 @@ launch_app:
     name:
       name: App name
       required: true
-      example: Netflix
+      example: 云视听极光
       selector:
         text:
     url:
-      name: App URL / id
+      name: App URL / package
       required: false
-      example: netflix
+      example: com.ktcp.video
       selector:
         text:
+
+refresh_apps:
+  name: Refresh my apps
+  description: Ask the TV for 电视应用 → 我的应用 (MQTT ``applist``).
+  target:
+    entity:
+      integration: hisense_e7n
+      domain: media_player

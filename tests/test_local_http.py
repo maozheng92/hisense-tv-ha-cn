@@ -262,3 +262,36 @@ def test_launch_app_prefers_local_package(proto_client, monkeypatch) -> None:
     monkeypatch.setattr(proto_client, "launch_local_app", lambda host, package, **kwargs: 200)
     client.launch_app("云视听极光", "com.ktcp.video")
     assert published == []
+    assert client.state.current_app == "云视听极光"
+
+
+def test_launch_app_mqtt_when_local_fails(
+    proto_client, proto_credentials, monkeypatch
+) -> None:
+    published: list[tuple[str, str]] = []
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    client._creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+
+    class FakeMqtt:
+        def publish(self, topic, payload=None, qos=0, retain=False):
+            published.append((topic, payload))
+
+            class Info:
+                rc = proto_client.mqtt.MQTT_ERR_SUCCESS
+
+                def wait_for_publish(self, timeout=None):
+                    return None
+
+            return Info()
+
+    client._client = FakeMqtt()
+    monkeypatch.setattr(proto_client, "launch_local_app", lambda host, package, **kwargs: None)
+    client.launch_app("Netflix", "netflix", url_type=37)
+    assert any(topic.endswith("/actions/launchapp") for topic, _ in published)
+    body = next(payload for topic, payload in published if topic.endswith("/actions/launchapp"))
+    assert '"url":"netflix"' in body
+    assert '"urlType":37' in body
+    assert '"isLocalApp":0' in body
+    assert client.state.current_app == "Netflix"

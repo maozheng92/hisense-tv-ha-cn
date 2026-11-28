@@ -277,6 +277,11 @@
       "tv": {
         "name": "电视"
       }
+    },
+    "select": {
+      "my_apps": {
+        "name": "我的应用"
+      }
     }
   },
   "services": {
@@ -292,17 +297,21 @@
     },
     "launch_app": {
       "name": "打开应用",
-      "description": "按名称启动电视上的应用。",
+      "description": "打开爱家「电视应用 → 我的应用」里的应用。有 Android 包名时走本机「电视打开」，否则 MQTT launchapp。",
       "fields": {
         "name": {
           "name": "应用名",
-          "description": "例如 Netflix。"
+          "description": "例如 云视听极光。"
         },
         "url": {
-          "name": "应用 URL / id",
-          "description": "可选，例如 netflix。"
+          "name": "应用 URL / 包名",
+          "description": "可选，例如 com.ktcp.video。"
         }
       }
+    },
+    "refresh_apps": {
+      "name": "刷新我的应用",
+      "description": "向电视重新拉取「电视应用 → 我的应用」列表。"
     }
   },
   "selector": {

@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .apps import format_app_title, resolve_app
+from .apps import app_choice_name, resolve_app
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_CONTROL_USERNAME,
@@ -92,6 +92,7 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
         self.custom_sources: list[dict] = []
         self.source_key_delay = DEFAULT_SOURCE_KEY_DELAY
         self.selected_source: str | None = None
+        self.last_app: str | None = None
         self._pin_notified = False
         client.add_listener(self._on_client_state)
 
@@ -275,6 +276,16 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
             return
         await self.client.async_launch_app(source)
 
+    async def async_ensure_apps(self, wait: float = 3.0) -> None:
+        """Fetch 我的应用 when the cached list is still empty."""
+        if self.tv.apps:
+            return
+        await self.client.async_refresh_apps(wait)
+
+    async def async_refresh_apps(self, wait: float = 3.0) -> None:
+        """Ask the TV again for 电视应用 → 我的应用."""
+        await self.client.async_refresh_apps(wait)
+
     async def async_launch_resolved_app(self, app: dict[str, Any]) -> None:
         name = str(app.get("name") or "")
         url = app.get("url") or app.get("app_id")
@@ -285,8 +296,12 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
             int(app.get("store_type") or 0),
             str(app["package"]) if app.get("package") else None,
         )
+        self.last_app = app_choice_name(app) or name
+        self.async_set_updated_data(self.client.state)
 
     async def async_launch_app(self, name: str, url: str | None = None) -> None:
+        if not self.tv.apps:
+            await self.client.async_refresh_apps(2.5)
         apps = self.tv.apps
         app = resolve_app(apps, name)
         if app is None and url:
@@ -295,6 +310,8 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
             await self.async_launch_resolved_app(app)
             return
         await self.client.async_launch_app(name, url)
+        self.last_app = name
+        self.async_set_updated_data(self.client.state)
 
     async def async_capture_and_store_screenshot(self) -> str:
         """Capture a frame and save it to Image upload (TCL screenshot path)."""

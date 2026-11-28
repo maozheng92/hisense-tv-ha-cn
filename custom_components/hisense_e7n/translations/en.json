@@ -279,6 +279,11 @@
       "tv": {
         "name": "TV"
       }
+    },
+    "select": {
+      "my_apps": {
+        "name": "My apps"
+      }
     }
   },
   "selector": {
@@ -303,17 +308,21 @@
     },
     "launch_app": {
       "name": "Launch app",
-      "description": "Launch an installed VIDAA app by name.",
+      "description": "Open an app from 爱家 电视应用 → 我的应用.",
       "fields": {
         "name": {
           "name": "App name",
-          "description": "Display name, for example Netflix."
+          "description": "Display name, for example 云视听极光."
         },
         "url": {
-          "name": "App URL / id",
-          "description": "Optional store url such as netflix."
+          "name": "App URL / package",
+          "description": "Optional store url or Android package."
         }
       }
+    },
+    "refresh_apps": {
+      "name": "Refresh my apps",
+      "description": "Ask the TV for the installed 我的应用 list."
     }
   }
 }

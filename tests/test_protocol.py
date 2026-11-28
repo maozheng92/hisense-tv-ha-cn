@@ -6,7 +6,7 @@ import time
 
 
 def test_platforms_match_tcl_no_button_entities(proto_const) -> None:
-    assert proto_const.PLATFORMS == ("media_player", "remote")
+    assert proto_const.PLATFORMS == ("media_player", "remote", "select")
     assert proto_const.ATTR_HIDDEN == "hidden"
 
 
@@ -103,6 +103,11 @@ def test_volume_and_source_parsing(proto_client) -> None:
     client._apply_state({"statetype": "remote_launcher", "sourcename": "HDMI1"})
     assert client.state.power_on is True
     assert client.state.statetype == "remote_launcher"
+    client._apply_state({"statetype": "app", "name": "云视听极光", "url": "com.ktcp.video"})
+    assert client.state.current_app == "云视听极光"
+    assert client.state.source_name == "云视听极光"
+    client._apply_state({"statetype": "livetv", "channel_name": "CCTV1"})
+    assert client.state.current_app is None
 
 
 def test_token_issuance_replaces_the_pairing_secret(proto_client) -> None:
@@ -412,3 +417,36 @@ def test_set_volume_steps_via_keys(proto_client, proto_credentials, monkeypatch)
     assert keys == ["KEY_VOLUMEUP", "KEY_VOLUMEUP", "KEY_VOLUMEUP"]
     assert not any(action in {"sendkey", "changevolume"} for _s, action, _p, _k in calls)
     assert client.state.volume == 13
+
+
+def test_on_connect_requests_applist(proto_client, proto_credentials) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+    client._creds = creds
+    published: list[tuple[str, str]] = []
+
+    class FakeMqtt:
+        def subscribe(self, topic, qos=0):
+            del topic, qos
+
+        def publish(self, topic, body, qos=0, retain=False):
+            published.append((topic, body))
+
+            class Info:
+                rc = proto_client.mqtt.MQTT_ERR_SUCCESS
+
+                def wait_for_publish(self, timeout=None):
+                    return None
+
+            return Info()
+
+    mqtt_client = FakeMqtt()
+    client._client = mqtt_client
+    client._on_connect(mqtt_client, None, {}, 0)
+    assert any(topic.endswith("/actions/applist") for topic, _ in published)
+    client.state.pin_requested = True
+    published.clear()
+    client._on_connect(mqtt_client, None, {}, 0)
+    assert not any(topic.endswith("/actions/applist") for topic, _ in published)

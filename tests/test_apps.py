@@ -86,3 +86,66 @@ def test_name_list_and_client_apply(proto_client) -> None:
     client._apply_apps({"list": []})
     assert client.state.apps[0]["name"] == "银河奇异果"
     assert client.state.apps[0]["url"] == "iqiyi"
+
+
+def test_my_apps_tab_skips_store_rows() -> None:
+    apps = load_proto("apps")
+    parsed = apps.normalize_apps(
+        {
+            "appTypeList": [
+                {
+                    "typeName": "我的应用",
+                    "appList": [
+                        {
+                            "name": "云视听极光",
+                            "packageName": "com.ktcp.video",
+                            "isLocalApp": 1,
+                        }
+                    ],
+                },
+                {
+                    "typeName": "热门",
+                    "appList": [{"name": "广告", "url": "ad"}],
+                },
+            ]
+        }
+    )
+    assert [item["name"] for item in parsed] == ["云视听极光"]
+    assert parsed[0]["package"] == "com.ktcp.video"
+
+
+def test_launch_payload_matches_vidaa_local_and_store() -> None:
+    apps = load_proto("apps")
+    local = apps.build_launch_payload(
+        {
+            "name": "云视听极光",
+            "url": "com.ktcp.video",
+            "app_id": "com.ktcp.video",
+            "url_type": 0,
+            "store_type": 0,
+            "package": "com.ktcp.video",
+        },
+        is_local=True,
+    )
+    assert local["isLocalApp"] == 1
+    assert local["urlType"] == 0
+    assert local["url"] == "com.ktcp.video"
+    assert local["has_detail_page"] == 0
+    store = apps.build_launch_payload(name="Netflix", url="netflix", url_type=37)
+    assert store == {
+        "appIcon": "",
+        "appId": "netflix",
+        "has_detail_page": 0,
+        "isLocalApp": 0,
+        "name": "Netflix",
+        "storeType": 0,
+        "type": 0,
+        "url": "netflix",
+        "urlType": 37,
+    }
+    named = apps.normalize_apps(
+        [{"name": "健身镜", "packageName": "com.hisense.fitness", "isLocalApp": 1}]
+    )
+    assert apps.app_choice_names(named) == ["健身镜"]
+    assert apps.current_app_option(named, "com.hisense.fitness") == "健身镜"
+    assert apps.current_app_option(named, "missing") is None

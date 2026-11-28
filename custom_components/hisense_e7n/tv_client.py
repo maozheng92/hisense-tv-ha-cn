@@ -20,7 +20,7 @@ from typing import Any
 import paho.mqtt.client as mqtt
 
 from . import topics
-from .apps import normalize_apps
+from .apps import build_launch_payload, normalize_apps, resolve_app
 from .certs_util import build_ssl_context
 from .const import (
     DEFAULT_PORT,
@@ -169,6 +169,7 @@ class TvState:
     source_name: str | None = None
     sources: list[dict[str, str]] = field(default_factory=list)
     apps: list[dict[str, Any]] = field(default_factory=list)
+    current_app: str | None = None
     auth_mode: str | None = None
     last_error: str | None = None
     needs_pin: bool = False
@@ -340,6 +341,19 @@ class HisenseTvClient:
             }
             if kind == "livetv":
                 self.state.source_name = data.get("channel_name") or name or "TV"
+                self.state.current_app = None
+            elif kind == "app":
+                app_name = str(
+                    data.get("name") or data.get("appName") or data.get("curAppName") or ""
+                ).strip()
+                app_url = str(data.get("url") or data.get("packageName") or "").strip()
+                self.state.current_app = app_name or app_url or None
+                if app_name:
+                    self.state.source_name = app_name
+            elif kind in {"sourceswitch", "remote_launcher"}:
+                self.state.current_app = None
+            elif not self.state.power_on:
+                self.state.current_app = None
         self._apply_volume(data)
         self._maybe_learn_tv_mac(data)
 
@@ -441,6 +455,12 @@ class HisenseTvClient:
                 client.subscribe(topic, qos=0)
         self._set_loop_event(self._connected_event)
         self._notify()
+        # 爱家 电视应用 → 我的应用. Once per MQTT session (reply on data/applist).
+        if self._creds and not self.state.needs_pin and not self.state.pin_requested:
+            try:
+                self.refresh_apps()
+            except (ConnectionError, RuntimeError, OSError):
+                _LOGGER.debug("applist after CONNECT failed", exc_info=True)
 
     def _cancel_offline_timer(self) -> None:
         with self._offline_lock:
@@ -1104,39 +1124,53 @@ class HisenseTvClient:
         pkg = (package or "").strip()
         if not is_android_package(pkg):
             pkg = app_url if is_android_package(app_url) else ""
-        if not pkg:
-            for app in self.state.apps:
-                if str(app.get("name") or "") == name or str(app.get("url") or "") == app_url:
-                    candidate = str(app.get("package") or app.get("url") or "")
-                    if is_android_package(candidate):
-                        pkg = candidate
-                        url_type = int(app.get("url_type") or url_type)
-                        break
+        matched = (
+            resolve_app(self.state.apps, name)
+            or resolve_app(self.state.apps, app_url)
+            or (resolve_app(self.state.apps, pkg) if pkg else None)
+        )
+        if matched is not None:
+            candidate = str(matched.get("package") or matched.get("url") or "")
+            if not pkg and is_android_package(candidate):
+                pkg = candidate
+            url_type = int(matched.get("url_type") if matched.get("url_type") is not None else url_type)
+            store_type = int(
+                matched.get("store_type") if matched.get("store_type") is not None else store_type
+            )
+            name = str(matched.get("name") or name)
+            app_url = str(matched.get("url") or pkg or app_url or name)
         if pkg:
             status = launch_local_app(self.host, pkg)
             if status is not None and 200 <= status < 300:
+                self.state.current_app = name or pkg
+                self._notify()
                 return
             _LOGGER.info("Local 电视打开 did not take %s (status %s); trying MQTT", pkg, status)
-            payload = {
-                "name": name or pkg,
-                "url": pkg,
-                "appId": pkg,
-                "urlType": 0,
-                "storeType": int(store_type),
-                "isLocalApp": 1,
-                "has_detail_page": 0,
-                "type": 0,
-            }
+            payload = build_launch_payload(
+                matched,
+                name=name or pkg,
+                url=pkg,
+                url_type=0,
+                store_type=store_type,
+                package=pkg,
+                is_local=True,
+            )
             self._publish_action("ui_service", "launchapp", payload)
+            self.state.current_app = payload["name"]
+            self._notify()
             return
-        payload = {
-            "name": name,
-            "url": app_url,
-            "appId": app_url,
-            "urlType": int(url_type),
-            "storeType": int(store_type),
-        }
+        payload = build_launch_payload(
+            matched,
+            name=name,
+            url=app_url,
+            url_type=url_type,
+            store_type=store_type,
+            package=package,
+            is_local=False,
+        )
         self._publish_action("ui_service", "launchapp", payload)
+        self.state.current_app = payload["name"]
+        self._notify()
 
     def refresh_apps(self) -> None:
         """Ask the TV for 我的应用. The reply arrives on the applist data topic."""
