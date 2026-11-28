@@ -32,9 +32,11 @@ class FakeSession:
     def __init__(self, routes: dict[str, object]):
         self.routes = routes
         self.calls: list[tuple[str, str]] = []
+        self.bodies: list[object] = []
 
     def request(self, method: str, url: str, **kwargs):
         self.calls.append((method.upper(), url))
+        self.bodies.append(kwargs.get("data"))
         for suffix, body in self.routes.items():
             if suffix in url:
                 status = 200
@@ -452,6 +454,68 @@ def test_summarize_json_includes_error_desc() -> None:
         {"payload": {"status": "FAIL", "errorCode": "X", "errorDesc": "partner mismatch"}}
     )
     assert "partner mismatch" in nested
+    msg = account._summarize_json({"resultCode": 1, "errorMsg": "device not bind"})
+    assert "device not bind" in msg
+
+
+def test_extend_state_sends_com_module_id() -> None:
+    account = _account()
+    session = FakeSession(
+        {
+            "/4.0/iot/home/list": {
+                "payload": {"status": "SUCCESS", "homes": [{"id": "home-1"}]}
+            },
+            "/4.0/iot/devices/list": {
+                "payload": {
+                    "status": "SUCCESS",
+                    "devices": [
+                        {
+                            "deviceId": "tv-1",
+                            "comModuleId": "com-mod-1",
+                            "homeId": "home-1",
+                            "partner": {"id": "1000"},
+                            "categoryCode": "connector.device.type.TV",
+                            "nickname": "客厅电视",
+                            "states": [{"name": "onlineStatus", "value": "1"}],
+                        }
+                    ],
+                }
+            },
+            "/4.0/iot/state/getExtendState": {
+                "payload": {
+                    "status": "SUCCESS",
+                    "mqttAppNameList": [
+                        {
+                            "name": "健身镜",
+                            "packageName": "com.hisense.fitness",
+                            "isLocalApp": 1,
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    async def _run():
+        tokens = account.AijiaTokens(access_token="tok", customer_id="c1")
+        updated, apps = await account.async_fetch_apps(session, tokens)
+        assert updated.com_module_id == "com-mod-1"
+        assert [item["name"] for item in apps] == ["健身镜"]
+        assert any(
+            isinstance(body, str) and "com-mod-1" in body and "payloadVersion" in body
+            for body in session.bodies
+        )
+
+    asyncio.run(_run())
+
+
+def test_login_id_from_nested_data() -> None:
+    account = _account()
+    assert (
+        account._login_id_from_blob({"data": {"tvLoginedId": "tv-token-123456"}})
+        == "tv-token-123456"
+    )
+    assert account._login_id_from_blob({"accessToken": "phone-token-xxx"}) == ""
 
 
 def test_parse_login_rejects_bad_password() -> None:

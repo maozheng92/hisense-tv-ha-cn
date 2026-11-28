@@ -32,7 +32,7 @@ E7N Pro（以及同代 E7N / E7NQ Pro）固件在 2024 之后通常还要：
 
 ## 集成做什么
 
-`custom_components/hisense_e7n`（1.25.4 起用配置里的电视 MAC / 设备 ID 末 12 位补 `wifiId`，`login4TV` 失败会记进日志，IoT 的 errorDesc 不再被当成成功；1.25.3 起登录后会再拉设备详情/`getExtendState` 解析 `mqttAppNameList`（含 name/value 状态表），栏目请求带 `wifiId` 并记下 HTTP 摘要；1.25.2 起选项里提交爱家账号后令牌立刻写入正在运行的集成，「浏览媒体」不再把登录提示当成可播放应用；1.25.1 起更多信息始终有「浏览媒体」；1.25.0 起可登录爱家账号拉取「我的应用」云栏目；1.24.2 起不再把 VIDAA MQTT `applist` 当成爱家列表。布局仍对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
+`custom_components/hisense_e7n`（1.25.5 起 `getExtendState` 带上设备已有的 `comModuleId` 和 `header.payloadVersion`，栏目改走门户签名的 GET；`wifiId` 是电视网卡 ID（MAC 去冒号），不是路由器 Wi-Fi 名；1.25.4 起用配置里的电视 MAC / 设备 ID 末 12 位补 `wifiId`，`login4TV` 失败会记进日志，IoT 的 errorDesc 不再被当成成功；1.25.3 起登录后会再拉设备详情/`getExtendState` 解析 `mqttAppNameList`（含 name/value 状态表），栏目请求带 `wifiId` 并记下 HTTP 摘要；1.25.2 起选项里提交爱家账号后令牌立刻写入正在运行的集成，「浏览媒体」不再把登录提示当成可播放应用；1.25.1 起更多信息始终有「浏览媒体」；1.25.0 起可登录爱家账号拉取「我的应用」云栏目；1.24.2 起不再把 VIDAA MQTT `applist` 当成爱家列表。布局仍对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
 
 - `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台、**浏览媒体**（我的应用）。**打开应用**走爱家本机「电视打开」（`/..pushsmartju`）。爱家「电视应用 → 我的应用」在配置流/选项里登录爱家账号后，从云端栏目（`getTvColumnList` / `mqttAppNameList`）填充；没登录或栏目为空时浏览媒体仍在，目录里是一句提示而不是 HA 的「没有项目」。`hisense_e7n.launch_app` 仍可按包名打开。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量只有 +/-（`VOLUME_STEP`），没有滑块。1.24.0 那个显示 unknown 的 `select`「我的应用」已删除
 - `remote`：与 TCL 一样不另起实体名（`_attr_name = None`，沿用设备名和 remote 平台默认图标）。发送 `KEY_*`（可用 Universal Remote Card）；关机状态下的电源键走同一套开机方式。爱家遥控页上的键（电源、音量、截屏、信号源、AI识图、方向键等）**不会**建成 `button` 实体，仍可通过 `remote.send_command` / `hisense_e7n.send_key` / 自定义输入源宏调用。升级后会删掉旧版留下的 `button.*`。
