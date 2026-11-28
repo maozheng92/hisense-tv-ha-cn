@@ -18,8 +18,9 @@ _FORM_STEPS = (
     "source_seq_repeat",
     "source_delete",
     "source_reorder",
+    "account",
 )
-_INIT_MENU = ("connection", "power_on", "volume", "sources", "save")
+_INIT_MENU = ("connection", "power_on", "volume", "sources", "account", "save")
 _SOURCE_MENU = (
     "source_add",
     "source_edit",
@@ -54,6 +55,8 @@ def test_zh_uses_button_entity_name() -> None:
     hidden = zh["options"]["step"]["source_add"]["data"]["hidden"]
     assert hidden == "从输入源列表中隐藏"
     assert zh["options"]["step"]["init"]["menu_options"]["volume"] == "音量按钮"
+    assert zh["options"]["step"]["init"]["menu_options"]["account"] == "爱家账号"
+    assert zh["config"]["step"]["account"]["data"]["aijia_password"] == "密码"
     assert zh["config"]["step"]["volume"]["data"]["音量加按钮"] == "音量加按钮"
     assert "entity" in zh
     assert "button" not in zh["entity"]
@@ -137,9 +140,9 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_24_2() -> None:
+def test_version_is_1_25_0() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.24.2"
+    assert manifest["version"] == "1.25.0"
     assert not (_ROOT / "www").exists()
     assert not (_ROOT / "select.py").exists()
 

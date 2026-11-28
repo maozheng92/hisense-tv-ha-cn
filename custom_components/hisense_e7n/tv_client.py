@@ -404,6 +404,19 @@ class HisenseTvClient:
         if data not in (None, "", [], {}):
             _LOGGER.info("applist payload did not parse as installed apps: %s", data)
 
+    def apply_cloud_apps(self, apps: list[dict[str, Any]]) -> None:
+        """Replace 我的应用 with rows from the 爱家 cloud column API."""
+        if not apps:
+            return
+        self.state.apps = list(apps)
+        self._set_loop_event(self._apps_event)
+        _LOGGER.info(
+            "爱家云 我的应用: %s app(s) %s",
+            len(apps),
+            [item.get("name") for item in apps[:20]],
+        )
+        self._notify()
+
     def _handle_message(self, topic: str, payload: bytes) -> None:
         data = _loads(payload)
         _LOGGER.debug("MQTT %s <- %s", topic, data)

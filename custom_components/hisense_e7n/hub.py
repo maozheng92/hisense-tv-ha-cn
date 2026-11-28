@@ -17,6 +17,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .aijia_account import (
+    AijiaAuthError,
+    AijiaError,
+    AijiaTokens,
+    async_fetch_apps,
+    tokens_from_entry,
+)
 from .apps import app_choice_name, app_choice_names, resolve_app
 from .const import (
     CONF_ACCESS_TOKEN,
@@ -93,8 +100,13 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
         self.source_key_delay = DEFAULT_SOURCE_KEY_DELAY
         self.selected_source: str | None = None
         self.last_app: str | None = None
+        self.aijia: AijiaTokens | None = None
         self._pin_notified = False
         client.add_listener(self._on_client_state)
+
+    @property
+    def aijia_logged_in(self) -> bool:
+        return bool(self.aijia and self.aijia.logged_in)
 
     @property
     def tv(self) -> TvState:
@@ -281,8 +293,52 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
         await self.client.async_launch_app(source)
 
     async def async_refresh_apps(self, wait: float = 3.0) -> None:
-        """Probe VIDAA MQTT ``applist`` (RemoteNOW). 爱家 does not use this."""
+        """Load 我的应用 from 爱家云 when logged in; otherwise probe VIDAA MQTT."""
+        if self.aijia_logged_in:
+            try:
+                await self.async_refresh_aijia_apps()
+            except (AijiaError, OSError) as err:
+                _LOGGER.warning("爱家云刷新我的应用失败: %s", err)
+            if self.tv.apps:
+                return
         await self.client.async_refresh_apps(wait)
+
+    async def async_refresh_aijia_apps(self) -> None:
+        """Fetch 爱家栏目 and apply the installed-app tiles."""
+        tokens = self.aijia
+        if tokens is None or not tokens.logged_in:
+            return
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        session = async_get_clientsession(self.hass)
+        try:
+            updated, apps = await async_fetch_apps(
+                session,
+                tokens,
+                host=self.client.host,
+                mac=self.client.tv_mac,
+            )
+        except AijiaAuthError:
+            _LOGGER.warning("爱家令牌已失效，请在集成选项重新登录")
+            raise
+        self.aijia = updated
+        self._store_aijia_tokens(updated)
+        if apps:
+            self.client.apply_cloud_apps(apps)
+            self.async_set_updated_data(self.client.state)
+
+    def configure_aijia(self, data: dict[str, Any] | None) -> None:
+        self.aijia = tokens_from_entry(data)
+
+    def _store_aijia_tokens(self, tokens: AijiaTokens) -> None:
+        entry = self.config_entry
+        if entry is None:
+            return
+        payload = tokens.to_entry()
+        merged = {**entry.data, **payload}
+        if all(entry.data.get(key) == value for key, value in payload.items()):
+            return
+        self.hass.config_entries.async_update_entry(entry, data=merged)
 
     async def async_launch_resolved_app(self, app: dict[str, Any]) -> None:
         name = str(app.get("name") or "")

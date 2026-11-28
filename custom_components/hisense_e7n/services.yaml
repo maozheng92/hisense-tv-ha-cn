@@ -58,7 +58,7 @@ launch_app:
 
 refresh_apps:
   name: Refresh my apps
-  description: Probe VIDAA MQTT applist (RemoteNOW). 爱家 我的应用 is a cloud column, not this topic.
+  description: Reload 我的应用 from the 爱家 cloud when an account is logged in. Otherwise probe VIDAA MQTT applist.
   target:
     entity:
       integration: hisense_e7n

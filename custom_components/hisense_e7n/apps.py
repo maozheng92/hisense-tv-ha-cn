@@ -1,16 +1,26 @@
-"""Parse an installed-app list if one arrives locally.
+"""Parse an installed-app list if one arrives locally or from 爱家云栏目.
 
 爱家「电视应用 → 我的应用」is not VIDAA MQTT ``applist``. The APK builds
 that page from cloud launcher columns (``getTvColumnList`` /
 ``mqttAppNameList``) and opens a package with LAN ``/..pushsmartju``.
-This module only normalizes a list the TV (or a caller) already has.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
-_NAME_KEYS = ("name", "appName", "appname", "title", "app_name", "label")
+_NAME_KEYS = (
+    "name",
+    "appName",
+    "appname",
+    "title",
+    "app_name",
+    "label",
+    "showName",
+    "resourceName",
+    "tileName",
+)
 _URL_KEYS = ("url", "appUrl", "appurl", "launchUrl")
 _ID_KEYS = ("appId", "appid", "id", "packageName", "packagename", "package")
 _PACKAGE_KEYS = ("packageName", "packagename", "package", "pkgName", "pkg")
@@ -49,6 +59,10 @@ _LIST_KEYS = _MY_APP_KEYS + (
     "value",
     "appInfoList",
     "appinfo",
+    "columns",
+    "columnList",
+    "tileList",
+    "tiles",
 )
 _NESTED_LIST_KEYS = (
     "appList",
@@ -58,6 +72,9 @@ _NESTED_LIST_KEYS = (
     "list",
     "children",
     "data",
+    "tiles",
+    "tileList",
+    "resources",
 )
 # 热门/推荐 are the store rows next to 我的应用, not the installed set.
 _OTHER_GROUPS = {"recommend", "hot", "store", "banner", "ad", "推荐", "热门", "应用推荐"}
@@ -298,11 +315,13 @@ def _nested_app_list(item: dict[str, Any]) -> list[Any] | None:
 
 
 def _looks_like_app(item: dict[str, Any]) -> bool:
-    if _first(item, _PACKAGE_KEYS) or _first(item, _URL_KEYS):
+    if _first(item, _PACKAGE_KEYS) or _first(item, _URL_KEYS) or _package_from_jump(item):
         return True
     if item.get("urlType") is not None or item.get("urltype") is not None:
         return True
     if item.get("isLocalApp") is not None or item.get("islocalapp") is not None:
+        return True
+    if item.get("startupType") in (4, "4"):
         return True
     return False
 
@@ -318,6 +337,7 @@ def _is_other_group(item: dict[str, Any]) -> bool:
 def _group_label(item: dict[str, Any]) -> str:
     return str(
         item.get("typeName")
+        or item.get("columnName")
         or item.get("name")
         or item.get("title")
         or item.get("appType")
@@ -336,13 +356,15 @@ def _one_app(item: Any) -> dict[str, Any] | None:
         return _record(name, name, name, 37, 0)
     if not isinstance(item, dict) or not _installed(item):
         return None
-    package = _first(item, _PACKAGE_KEYS)
+    package = _first(item, _PACKAGE_KEYS) or _package_from_jump(item)
     name = _first(item, _NAME_KEYS)
     app_id = _first(item, _ID_KEYS)
     url = _first(item, _URL_KEYS) or package or app_id or name
-    icon = _first(item, ("icon", "iconUrl", "appIcon", "thumbnail"))
+    icon = _first(item, ("icon", "iconUrl", "appIcon", "thumbnail", "imageUrl"))
     size = _format_size(item)
-    local = _truthy(item.get("isLocalApp", item.get("islocalapp")))
+    local = _truthy(item.get("isLocalApp", item.get("islocalapp"))) or item.get(
+        "startupType"
+    ) in (4, "4")
     if package and (local or not _first(item, _URL_KEYS)):
         url = package
     if not name:
@@ -409,6 +431,53 @@ def _first(item: dict[str, Any], keys: tuple[str, ...]) -> str:
         if value not in (None, ""):
             return str(value)
     return ""
+
+
+def _package_from_jump(item: dict[str, Any]) -> str:
+    """Tiles often stash the Android package in ``jumpParam`` / ``startupUrl``."""
+    for key in ("jumpParam", "jumpParams", "jump", "startupUrl", "startupParam"):
+        package = _package_in_node(item.get(key))
+        if package:
+            return package
+    return ""
+
+
+def _package_in_node(node: Any) -> str:
+    if isinstance(node, str):
+        text = node.strip()
+        if not text:
+            return ""
+        if _looks_like_package(text):
+            return text
+        if text[:1] in "{[":
+            try:
+                return _package_in_node(json.loads(text))
+            except json.JSONDecodeError:
+                return ""
+        return ""
+    if isinstance(node, dict):
+        for key in _PACKAGE_KEYS:
+            value = node.get(key)
+            if _looks_like_package(str(value or "").strip()):
+                return str(value).strip()
+        for value in node.values():
+            found = _package_in_node(value)
+            if found:
+                return found
+        return ""
+    if isinstance(node, list):
+        for item in node:
+            found = _package_in_node(item)
+            if found:
+                return found
+    return ""
+
+
+def _looks_like_package(value: str) -> bool:
+    if "." not in value or value.startswith(("http://", "https://")):
+        return False
+    parts = value.split(".")
+    return len(parts) >= 2 and all(part and part[0].isalpha() for part in parts)
 
 
 def _as_int(value: Any, default: int) -> int:

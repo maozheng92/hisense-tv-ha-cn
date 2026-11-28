@@ -243,8 +243,10 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         ):
             apps = self.hub.tv.apps
             if not apps:
+                if self.hub.aijia_logged_in:
+                    raise BrowseError("爱家已登录，但云栏目没有返回「我的应用」")
                 raise BrowseError(
-                    "爱家「我的应用」来自登录后的云端栏目，本机 MQTT 没有这份列表"
+                    "请在集成选项登录爱家账号以加载「我的应用」；本机 MQTT 没有这份列表"
                 )
             return BrowseMedia(
                 title="我的应用",
@@ -267,6 +269,8 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             "source_id": tv.source_id,
             "power_on_mode": self.hub.power_on_mode,
             "current_app": tv.current_app,
+            "aijia_account": (self.hub.aijia.username if self.hub.aijia else "") or None,
+            "aijia_logged_in": self.hub.aijia_logged_in,
             "apps": [format_app_title(app) for app in tv.apps if format_app_title(app)],
             "installed_apps": [app_summary(app) for app in tv.apps],
             "custom_sources": [

@@ -257,6 +257,8 @@ E7N Pro 是 VIDAA 机。爱家添加家电会提示打开蓝牙（`flutter_blue_
 
 因此：没有爱家账号 token，HA **不能**克隆「我的应用」列表。VIDAA MQTT `actions/applist` 是 RemoteNOW 路径，爱家不用，这台 E7N 也不回。
 
+1.25.0 起集成可在配置流/选项里用爱家**手机号 + 密码**登录（`POST /mobile/se/signon`，网页客户端 `commonweb` 的 `X-Sign-For`）。令牌写入 config entry，密码不保存；随后拉 `devices/list` 匹配这台电视，再请求 `api/columns` / `mqttAppNameList`。打开仍走 LAN `pushsmartju`。
+
 ## 9. 想对接自己电视时该看哪一层
 
 1. **已登录爱家账号、电视已绑定**：云通道即可。按键走 `/mobilemsg/push/v5.3/remoter`，开关机/场景走 `/4.0/iot/devices/execute`，MQTT 配置走 `/2.0/mqtt/config`。请求需要账号 token 和 `deviceId`。

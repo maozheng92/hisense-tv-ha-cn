@@ -150,3 +150,29 @@ def test_launch_payload_matches_vidaa_local_and_store() -> None:
     assert apps.app_choice_names(named) == ["健身镜"]
     assert apps.current_app_option(named, "com.hisense.fitness") == "健身镜"
     assert apps.current_app_option(named, "missing") is None
+
+
+def test_cloud_column_tiles_and_jump_param() -> None:
+    apps = load_proto("apps")
+    parsed = apps.normalize_apps(
+        {
+            "columnName": "我的应用",
+            "tiles": [
+                {
+                    "showName": "云视听极光",
+                    "startupType": 4,
+                    "jumpParam": {"packageName": "com.ktcp.video"},
+                    "iconUrl": "https://example/icon.png",
+                },
+                {
+                    "name": "广告",
+                    "category": "recommend",
+                    "url": "ad",
+                },
+            ],
+        }
+    )
+    assert [item["name"] for item in parsed] == ["云视听极光"]
+    assert parsed[0]["package"] == "com.ktcp.video"
+    assert parsed[0]["url_type"] == 0
+    assert parsed[0]["icon"] == "https://example/icon.png"

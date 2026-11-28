@@ -32,13 +32,13 @@ E7N Pro（以及同代 E7N / E7NQ Pro）固件在 2024 之后通常还要：
 
 ## 集成做什么
 
-`custom_components/hisense_e7n`（1.24.2 起不再把 VIDAA MQTT `applist` 当成爱家「我的应用」；布局仍对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
+`custom_components/hisense_e7n`（1.25.0 起可登录爱家账号拉取「我的应用」云栏目；1.24.2 起不再把 VIDAA MQTT `applist` 当成爱家列表。布局仍对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
 
-- `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台。**打开应用**走爱家本机「电视打开」（`/..pushsmartju`）。爱家「电视应用 → 我的应用」的列表来自登录后的云端栏目（见 [tv-control-methods.md](tv-control-methods.md) §10），本机 MQTT 没有，所以空列表时不再露出媒体浏览器「没有项目」。`hisense_e7n.launch_app` 仍可按包名打开。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量只有 +/-（`VOLUME_STEP`），没有滑块。1.24.0 那个显示 unknown 的 `select`「我的应用」已删除
+- `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台。**打开应用**走爱家本机「电视打开」（`/..pushsmartju`）。爱家「电视应用 → 我的应用」在配置流/选项里登录爱家账号后，从云端栏目（`getTvColumnList` / `mqttAppNameList`）填充；没登录或栏目为空时不露出媒体浏览器「没有项目」。`hisense_e7n.launch_app` 仍可按包名打开。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量只有 +/-（`VOLUME_STEP`），没有滑块。1.24.0 那个显示 unknown 的 `select`「我的应用」已删除
 - `remote`：与 TCL 一样不另起实体名（`_attr_name = None`，沿用设备名和 remote 平台默认图标）。发送 `KEY_*`（可用 Universal Remote Card）；关机状态下的电源键走同一套开机方式。爱家遥控页上的键（电源、音量、截屏、信号源、AI识图、方向键等）**不会**建成 `button` 实体，仍可通过 `remote.send_command` / `hisense_e7n.send_key` / 自定义输入源宏调用。升级后会删掉旧版留下的 `button.*`。
-- 配置流：先填 IP（连接），再选开机方式，再可选音量加减实体。不需要蓝牙地址。若电视屏幕弹出 4 位数字，调用 `hisense_e7n.submit_code`
-- 选项（对齐 TCL）：草稿菜单「连接 / 开机 / 音量按钮 / 输入源 / 保存」。子表单页脚左侧「返回」、右侧「提交」；**输入源**菜单行只有添加/修改/删除/调整顺序，页脚**左侧「返回」（plain）**、**右侧「保存」（filled）**，不是「提交」。页脚脚本在 `frontend/`，启动时自动安装到 `config/www/hisense_e7n/`（`/local/hisense_e7n/`）。**集成包内不再有 `www/`**（Windows 上 HA 占用该目录会导致无法覆盖更新）。若旧版 `custom_components/hisense_e7n/www` 删不掉，先**停止 Home Assistant** 再删，然后拷新版本。升级后请**硬刷新 HA 前端**。输入源可隐藏、单独设置间隔、用本集成按键或 HA `button.*` 组成序列（勾选 → 重复次数 → 可再加一组），并拖动排序
-- `iot_class: local_push`，不经过海信云
+- 配置流：先填 IP（连接），再选开机方式，再可选音量加减实体，最后可选登录爱家账号（手机号+密码，密码不保存）。不需要蓝牙地址。若电视屏幕弹出 4 位数字，调用 `hisense_e7n.submit_code`
+- 选项（对齐 TCL）：草稿菜单「连接 / 开机 / 音量按钮 / 输入源 / 爱家账号 / 保存」。子表单页脚左侧「返回」、右侧「提交」；**输入源**菜单行只有添加/修改/删除/调整顺序，页脚**左侧「返回」（plain）**、**右侧「保存」（filled）**，不是「提交」。页脚脚本在 `frontend/`，启动时自动安装到 `config/www/hisense_e7n/`（`/local/hisense_e7n/`）。**集成包内不再有 `www/`**（Windows 上 HA 占用该目录会导致无法覆盖更新）。若旧版 `custom_components/hisense_e7n/www` 删不掉，先**停止 Home Assistant** 再删，然后拷新版本。升级后请**硬刷新 HA 前端**。输入源可隐藏、单独设置间隔、用本集成按键或 HA `button.*` 组成序列（勾选 → 重复次数 → 可再加一组），并拖动排序
+- `iot_class: local_push`：按键仍走机内 MQTT / LAN；爱家登录只用于拉「我的应用」列表
 
 ## 安装
 
@@ -51,7 +51,8 @@ E7N Pro（以及同代 E7N / E7NQ Pro）固件在 2024 之后通常还要：
    - **红外遥控**：选一个 `remote` 实体（Broadlink、ESPHome、Harmony），并填写它里面保存的开机指令名，例如 `power`。Harmony 还可以填设备名。
    - **网络唤醒**：填写电视 Wi-Fi MAC。
 6. 爱家手机配对不需要 PIN。若 HA 通知「电视屏幕上出现了 4 位数字」，那是电视在授权这个新遥控，把数字填进服务 `hisense_e7n.submit_code`。
-7. 已添加的集成更新后会自己换成新的客户端身份，不用重填蓝牙地址。
+7. **爱家账号**（可选）：填手机号和密码，用于拉取「电视应用 → 我的应用」。密码不写入配置，只保存 access/refresh token。已添加的电视可在选项里补登。只支持密码登录；若爱家只能短信登录，先在 App 里设置密码。
+8. 已添加的集成更新后会自己换成新的客户端身份，不用重填蓝牙地址。
 
 HACS：把本仓库加为自定义仓库（类别 Integration）。
 
@@ -73,9 +74,9 @@ data:
   key: KEY_HOME
 ```
 
-打开应用（爱家「电视打开」，不是云栏目列表）：
+打开应用（列表来自爱家云，打开走本机）：
 
-爱家 APK **不会**向 VIDAA `:36669` 发 `ui_service/actions/applist`。电视应用页的「我的应用」来自登录后的 `getTvColumnList` / `mqttAppNameList`（账号 + X-SIGN）。HA 没有爱家登录态，所以拉不到那份列表，媒体浏览器空着时不再显示「我的应用 / 没有项目」。
+爱家 APK **不会**向 VIDAA `:36669` 发 `ui_service/actions/applist`。电视应用页的「我的应用」来自登录后的 `getTvColumnList` / `mqttAppNameList`（账号 + `X-Sign-For`）。在配置流或选项里登录爱家后，集成会拉这份列表；没登录或栏目为空时，媒体浏览器不显示「我的应用 / 没有项目」。
 
 打开已安装包仍走爱家本机口：
 
@@ -88,7 +89,7 @@ data:
   url: com.ktcp.video
 ```
 
-有 Android 包名时优先 `POST http://<电视IP>:7779/..pushsmartju`（`startupType` 4）。`hisense_e7n.refresh_apps` 只探测 RemoteNOW 的 MQTT `applist`，E7N 通常无回复。
+有 Android 包名时优先 `POST http://<电视IP>:7779/..pushsmartju`（`startupType` 4）。已登录时 `hisense_e7n.refresh_apps` 会重新拉爱家云栏目；未登录时才探测 RemoteNOW 的 MQTT `applist`（E7N 通常无回复）。
 
 爱家遥控页对应关系：
 
