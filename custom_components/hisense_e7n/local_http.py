@@ -219,6 +219,38 @@ def launch_local_app(
     return answered
 
 
+def fetch_device_identity(
+    host: str,
+    *,
+    ports: tuple[int, ...] = APP_PORTS,
+    timeout: float = 1.5,
+) -> dict[str, Any] | None:
+    """GET/POST ``/..deviceid``. Ticket / wifiId for 爱家 IoT when list is empty."""
+    for port in ports:
+        for method, payload in (("GET", None), ("POST", {})):
+            result = _exchange(
+                f"http://{host}:{port}/..deviceid", payload, timeout, method=method
+            )
+            if result is None:
+                continue
+            status, raw = result
+            if not 200 <= status < 300 or not raw:
+                continue
+            try:
+                payload_json = json.loads(raw.decode("utf-8", "replace"))
+            except (UnicodeError, json.JSONDecodeError):
+                text = raw.decode("utf-8", "replace").strip()
+                if text:
+                    return {"ticket": text}
+                continue
+            if isinstance(payload_json, dict) and payload_json:
+                nested = payload_json.get("data")
+                if isinstance(nested, dict) and nested:
+                    return nested
+                return payload_json
+    return None
+
+
 def fetch_hishare_capacity(
     host: str,
     *,

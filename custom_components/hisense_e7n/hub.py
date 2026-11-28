@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from typing import Any
 
 from homeassistant.components import persistent_notification
@@ -49,6 +50,7 @@ from .custom_sources import (
     visible_source_names,
 )
 from .keys import KEY_VOLUMEDOWN, KEY_VOLUMEUP, normalize_key
+from .local_http import fetch_device_identity
 from .power import (
     entity_press_call,
     infer_power_on_mode,
@@ -328,6 +330,7 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
         session = async_get_clientsession(self.hass)
+        tokens = await self._async_merge_lan_identity(tokens)
         try:
             updated, apps = await async_fetch_apps(
                 session,
@@ -343,6 +346,42 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
         if apps:
             self.client.apply_cloud_apps(apps)
             self.async_set_updated_data(self.client.state)
+
+    async def _async_merge_lan_identity(self, tokens: AijiaTokens) -> AijiaTokens:
+        """``/..deviceid`` may hold the ticket getExtendState keeps asking for."""
+        if tokens.ticket:
+            return tokens
+        try:
+            identity = await self.hass.async_add_executor_job(
+                fetch_device_identity, self.client.host
+            )
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("LAN /..deviceid failed", exc_info=True)
+            return tokens
+        if not isinstance(identity, dict) or not identity:
+            return tokens
+        ticket = str(
+            identity.get("ticket")
+            or identity.get("hiTicket")
+            or identity.get("deviceTicket")
+            or ""
+        ).strip()
+        wifi = str(identity.get("wifiId") or identity.get("wifi_id") or "").strip()
+        login = str(
+            identity.get("tvLoginedId")
+            or identity.get("tvLoginId")
+            or identity.get("license")
+            or ""
+        ).strip()
+        if not ticket and not wifi and not login:
+            return tokens
+        _LOGGER.debug("LAN /..deviceid keys=%s", ",".join(str(key) for key in identity))
+        return replace(
+            tokens,
+            ticket=tokens.ticket or ticket,
+            wifi_id=tokens.wifi_id or wifi,
+            tv_login_id=tokens.tv_login_id or login,
+        )
 
     def configure_aijia(self, data: dict[str, Any] | None) -> None:
         self.aijia = tokens_from_entry(data)

@@ -115,20 +115,32 @@ def normalize_apps(data: Any) -> list[dict[str, Any]]:
     return apps
 
 
-# 爱家 APK 里写死的 ``/..pushsmartju`` 包名（电视应用页「打开」）。
-# 云栏目拿不到时，浏览媒体仍用这些包名建可点击的打开图标。
+# 爱家「电视应用 → 我的应用」是电视预装系统应用，不是「热门精选」里的云视听。
+# 包名来自 VIDAA 公开精简列表；云栏目仍空时浏览媒体用这份目录建打开图标。
 _DEFAULT_LAUNCH_APPS = (
-    ("云视听极光", "com.ktcp.video"),
-    ("云视听", "com.ktcp.csvideo"),
-    ("聚好看", "com.jamdeo.tv.vod"),
-    ("应用商店", "com.hisense.store.tv"),
-    ("CIBN", "com.cibn.tv"),
-    ("海信视频", "com.hisensecpa.tv"),
+    ("海信爱家", "com.jamdeo.android.jamdeosmarthome"),
+    ("家庭私有云", "com.hisense.hitv.nas"),
+    ("健身镜", "com.hisense.fitness"),
+    ("聚连会议", "com.hisense.julink"),
+    ("天气", "com.hisense.weather"),
+    ("小聚助手", "com.hisense.tv.aivirtualassistant"),
+    ("微信电视", "com.android.wechathci"),
+    ("Hi音乐", "com.hisense.himusic"),
+    ("视频通话", "com.hisense.tv.videochat"),
+    ("智绘童话", "com.hisense.fairytale"),
+    ("屏保画册", "com.jamdeo.screensaver"),
+    ("玩机宝典", "com.hisense.electronictutorial"),
+    ("Hi投屏", "com.hisense.multiscreen.screenhelper"),
+    ("媒体中心", "com.jamdeo.tv.mediacenter"),
+    ("日历", "com.jamdeo.calendar"),
+    ("语音专区", "com.keylab.speech.view.vidaa"),
+    ("系统设置", "com.android.tv.settings"),
 )
+_PACKAGE_BY_NAME = {name: package for name, package in _DEFAULT_LAUNCH_APPS}
 
 
 def default_launch_apps() -> list[dict[str, Any]]:
-    """LAN-openable TV apps from the 爱家 APK, used when the cloud list is empty."""
+    """爱家「我的应用」预装目录；云列表为空时浏览媒体用这些打开图标。"""
     return [
         _record(
             name,
@@ -142,6 +154,23 @@ def default_launch_apps() -> list[dict[str, Any]]:
         )
         for name, package in _DEFAULT_LAUNCH_APPS
     ]
+
+
+def attach_known_packages(apps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fill package/url when mqttAppNameList only has display names."""
+    filled: list[dict[str, Any]] = []
+    for app in apps:
+        row = dict(app)
+        name = str(row.get("name") or "").strip()
+        if name and not str(row.get("package") or "").strip():
+            package = _PACKAGE_BY_NAME.get(name)
+            if package:
+                row["package"] = package
+                row["url"] = package
+                row["app_id"] = str(row.get("app_id") or package)
+                row["url_type"] = 0
+        filled.append(row)
+    return filled
 
 
 def format_app_title(app: dict[str, Any]) -> str:

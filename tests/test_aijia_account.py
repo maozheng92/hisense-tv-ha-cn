@@ -153,6 +153,40 @@ def test_extract_cloud_apps_filters_tiles_by_mqtt_names() -> None:
     assert apps[0]["package"] == "com.ktcp.video"
 
 
+def test_extract_cloud_apps_prefers_mqtt_names_over_hot_tiles() -> None:
+    account = _account()
+    apps = account.extract_cloud_apps(
+        {
+            "mqttAppNameList": ["海信爱家", "微信电视"],
+            "columns": [
+                {
+                    "columnName": "热门精选",
+                    "tiles": [
+                        {
+                            "name": "云视听极光",
+                            "packageName": "com.ktcp.video",
+                            "startupType": 4,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    assert [item["name"] for item in apps] == ["海信爱家", "微信电视"]
+    assert apps[0]["package"] == "com.jamdeo.android.jamdeosmarthome"
+
+
+def test_extract_cloud_apps_attaches_packages_for_my_apps_names() -> None:
+    account = _account()
+    apps = account.extract_cloud_apps(
+        {"mqttAppNameList": ["海信爱家", "微信电视", "媒体中心"]}
+    )
+    assert [item["name"] for item in apps] == ["海信爱家", "微信电视", "媒体中心"]
+    assert apps[0]["package"] == "com.jamdeo.android.jamdeosmarthome"
+    assert apps[1]["package"] == "com.android.wechathci"
+    assert apps[2]["package"] == "com.jamdeo.tv.mediacenter"
+
+
 def test_async_login_and_fetch_apps_from_device_state() -> None:
     account = _account()
     tv = {

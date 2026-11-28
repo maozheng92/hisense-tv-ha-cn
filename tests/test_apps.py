@@ -79,17 +79,21 @@ def test_resolve_app_matches_package_name_and_substring() -> None:
 def test_default_launch_apps_are_local_packages() -> None:
     apps = load_proto("apps")
     catalog = apps.default_launch_apps()
-    assert [item["name"] for item in catalog] == [
-        "云视听极光",
-        "云视听",
-        "聚好看",
-        "应用商店",
-        "CIBN",
-        "海信视频",
+    assert [item["name"] for item in catalog][:5] == [
+        "海信爱家",
+        "家庭私有云",
+        "健身镜",
+        "聚连会议",
+        "天气",
     ]
-    assert catalog[0]["package"] == "com.ktcp.video"
+    assert catalog[0]["package"] == "com.jamdeo.android.jamdeosmarthome"
     assert catalog[0]["url_type"] == 0
-    assert apps.resolve_app(catalog, "com.jamdeo.tv.vod")["name"] == "聚好看"
+    assert "云视听极光" not in [item["name"] for item in catalog]
+    assert apps.resolve_app(catalog, "com.android.wechathci")["name"] == "微信电视"
+    assert apps.resolve_app(catalog, "com.jamdeo.tv.mediacenter")["name"] == "媒体中心"
+    named = apps.attach_known_packages([{"name": "玩机宝典", "url": "玩机宝典"}])
+    assert named[0]["package"] == "com.hisense.electronictutorial"
+    assert named[0]["url_type"] == 0
 
 
 def test_name_list_and_client_apply(proto_client) -> None:

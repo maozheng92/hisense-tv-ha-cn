@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-from .apps import normalize_apps
+from .apps import attach_known_packages, normalize_apps
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -287,18 +287,19 @@ def extract_cloud_apps(data: Any) -> list[dict[str, Any]]:
             for tile in tiles
             if str(_tile_name(tile) or "").strip().casefold() in wanted
         ]
-        parsed = normalize_apps(matched or tiles)
-        if parsed:
-            return parsed
-    if tiles:
+        if matched:
+            parsed = normalize_apps(matched)
+            if parsed:
+                return attach_known_packages(parsed)
+    if tiles and not names:
         parsed = normalize_apps({"我的应用": tiles})
         if parsed:
-            return parsed
+            return attach_known_packages(parsed)
     if names:
         parsed = normalize_apps({"mqttAppNameList": names})
         if parsed:
-            return parsed
-    return normalize_apps(data)
+            return attach_known_packages(parsed)
+    return attach_known_packages(normalize_apps(data))
 
 
 def _login_id_from_blob(data: Any, depth: int = 0) -> str:
@@ -916,6 +917,8 @@ async def _column_candidates(
                 "deviceId": tokens.device_id,
                 "wifiId": tokens.wifi_id,
                 "customerId": tokens.customer_id,
+                "terminalTypeCode": "2",
+                "sceneCode": "TV",
             },
         )
     except AijiaError as err:

@@ -222,6 +222,22 @@ def test_send_key_stops_after_http_accepts(proto_client, proto_credentials, monk
     assert published == []
 
 
+def test_fetch_device_identity_reads_deviceid(proto_local_http, monkeypatch) -> None:
+    seen: list[str] = []
+
+    def fake_urlopen(request, timeout=0):
+        del timeout
+        seen.append(request.full_url)
+        if request.full_url.endswith(":7779/..deviceid"):
+            return _Body(200, b'{"ticket":"lan-ticket","wifiId":"aabbccddeeff"}')
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(proto_local_http.urllib.request, "urlopen", fake_urlopen)
+    identity = proto_local_http.fetch_device_identity("192.0.2.10", timeout=0.1)
+    assert identity == {"ticket": "lan-ticket", "wifiId": "aabbccddeeff"}
+    assert seen[0].endswith("/..deviceid")
+
+
 def test_launch_local_app_posts_pushsmartju(proto_local_http, monkeypatch) -> None:
     seen: list[tuple[str, bytes | None]] = []
 
