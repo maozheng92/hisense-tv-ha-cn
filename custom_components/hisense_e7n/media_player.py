@@ -1,13 +1,17 @@
 """TV media player for Hisense E7N Pro.
 
-Layout follows TCL: HDMI/custom macros on source_list, installed apps in
-Media Browser (browse_media / play_media). VOLUME_SET is advertised so HA
-exposes ``volume_level``; control stays LAN KEY_VOLUME +/- (or optional HA
-buttons). Dragging the slider does not send MQTT ``changevolume``.
+HDMI/custom macros on source_list. 爱家 我的应用 is a cloud column; the
+media browser is always advertised so more-info keeps 「浏览媒体」.
+
+VOLUME_SET is advertised so HA exposes ``volume_level``. Control stays
+LAN KEY_VOLUME +/- (or optional HA buttons). Dragging the slider does
+not send MQTT ``changevolume``. 爱家 itself has no TV volume/mute
+telemetry; mute follows the remoter's local toggle.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import voluptuous as vol
@@ -38,7 +42,14 @@ try:
 except ImportError:  # pragma: no cover
     ServiceValidationError = HomeAssistantError  # type: ignore[misc,assignment]
 
-from .apps import app_media_id, format_app_title, resolve_app
+from .aijia_account import status_text as aijia_status_text
+from .apps import (
+    app_media_id,
+    app_summary,
+    default_launch_apps,
+    format_app_title,
+    resolve_app,
+)
 from .entity import HisenseTvEntity, tv_errors
 from .hub import HisenseTvHub, hub_from_entry
 from .keys import (
@@ -50,6 +61,9 @@ from .keys import (
     KEY_VOLUMEDOWN,
     KEY_VOLUMEUP,
 )
+
+_LOGGER = logging.getLogger(__name__)
+_HINT_MEDIA_IDS = frozenset({"", "apps", "aijia-login", "apps-hint", "apps-refresh"})
 
 # VOLUME_SET is required for HA to put volume_level on the state object.
 # Control is still VOLUME_STEP (LAN KEY_VOLUME* / optional HA buttons).
@@ -84,6 +98,11 @@ async def async_setup_entry(
             vol.Optional("url"): cv.string,
         },
         "async_launch_app_service",
+    )
+    platform.async_register_entity_service(
+        "refresh_apps",
+        {},
+        "async_refresh_apps_service",
     )
 
 
@@ -142,15 +161,21 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
 
     @property
     def media_title(self) -> str | None:
-        return self.source
+        return self.hub.tv.current_app or self.source
 
     @property
     def source(self) -> str | None:
         names = self.source_list or []
+        current_app = self.hub.tv.current_app
+        if current_app in names:
+            return current_app
         selected = self.hub.selected_source
         if selected in names:
             return selected
-        return self.hub.tv.source_name
+        source_name = self.hub.tv.source_name
+        if source_name in names:
+            return source_name
+        return source_name or current_app
 
     @property
     def source_list(self) -> list[str] | None:
@@ -186,11 +211,14 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
 
     async def async_mute_volume(self, mute: bool) -> None:
         tv = self.hub.client.state
-        if tv.muted != mute:
-            with tv_errors():
-                await self.hub.client.async_toggle_mute()
-            self._sync_volume_attrs()
-            self.async_write_ha_state()
+        if tv.muted is None and not mute:
+            return
+        if tv.muted == mute:
+            return
+        with tv_errors():
+            await self.hub.client.async_toggle_mute()
+        self._sync_volume_attrs()
+        self.async_write_ha_state()
 
     async def async_media_play(self) -> None:
         with tv_errors():
@@ -220,6 +248,10 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         with tv_errors():
             await self.hub.async_launch_app(name, url)
 
+    async def async_refresh_apps_service(self) -> None:
+        with tv_errors():
+            await self.hub.async_refresh_apps()
+
     async def async_play_media(
         self, media_type: str, media_id: str, **kwargs: Any
     ) -> None:
@@ -227,10 +259,20 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             raise ServiceValidationError(
                 f"Unsupported media type {media_type!r}; use app"
             )
+        await self._async_ensure_cloud_apps(force=media_id in _HINT_MEDIA_IDS)
+        if media_id in _HINT_MEDIA_IDS:
+            if self.hub.tv.apps:
+                return
+            raise ServiceValidationError(_apps_empty_message(self.hub))
         app = resolve_app(self.hub.tv.apps, media_id)
         if app is None:
+            await self._async_ensure_cloud_apps(force=True)
+            app = resolve_app(self.hub.tv.apps, media_id)
+        if app is None:
+            app = resolve_app(default_launch_apps(), media_id)
+        if app is None:
             raise ServiceValidationError(
-                f"Unknown app {media_id!r}; browse Applications on this media player"
+                f"Unknown app {media_id!r}; open 我的应用 on this media player"
             )
         with tv_errors():
             await self.hub.async_launch_resolved_app(app)
@@ -242,23 +284,57 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
     ) -> BrowseMedia:
         if (
             (media_content_type is None and media_content_id is None)
-            or media_content_id in ("", "apps")
+            or media_content_id in _HINT_MEDIA_IDS
             or media_content_type in (MediaType.APPS, "apps")
         ):
+            apps = list(self.hub.tv.apps)
+            if not apps:
+                await self._async_ensure_cloud_apps(
+                    force=media_content_id in ("apps-refresh", "aijia-login")
+                )
+                apps = list(self.hub.tv.apps)
+            children = [_app_item(app) for app in apps]
+            if not children:
+                children = [_app_item(app) for app in default_launch_apps()]
+            if children:
+                return BrowseMedia(
+                    title="我的应用",
+                    media_class=MediaClass.APP,
+                    media_content_id="apps",
+                    media_content_type=MediaType.APPS,
+                    can_play=False,
+                    can_expand=True,
+                    children=children,
+                    children_media_class=MediaClass.APP,
+                )
             return BrowseMedia(
-                title="Applications",
-                media_class=MediaClass.APP,
+                title="我的应用",
+                media_class=MediaClass.DIRECTORY,
                 media_content_id="apps",
                 media_content_type=MediaType.APPS,
                 can_play=False,
                 can_expand=True,
-                children=[_app_item(app) for app in self.hub.tv.apps],
-                children_media_class=MediaClass.APP,
+                children=[_apps_placeholder(self.hub.aijia_logged_in)],
+                children_media_class=MediaClass.DIRECTORY,
             )
         raise BrowseError("Media not found")
 
+    async def _async_ensure_cloud_apps(self, force: bool = False) -> None:
+        self.hub.sync_aijia_from_entry()
+        if not self.hub.aijia_logged_in:
+            return
+        if self.hub.tv.apps and not force:
+            return
+        try:
+            await self.hub.async_refresh_aijia_apps(force=force)
+        except HomeAssistantError:
+            raise
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("爱家云刷新我的应用失败", exc_info=True)
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        self.hub.sync_aijia_from_entry()
         tv = self.hub.client.state
         return {
             "statetype": tv.statetype,
@@ -268,7 +344,15 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             "volume_type": tv.volume_type,
             "volume_topic": tv.volume_topic,
             "power_on_mode": self.hub.power_on_mode,
+            "current_app": tv.current_app,
+            "aijia": aijia_status_text(
+                self.hub.aijia,
+                (self.hub.aijia.username if self.hub.aijia else "") or "",
+            ),
+            "aijia_account": (self.hub.aijia.username if self.hub.aijia else "") or None,
+            "aijia_logged_in": self.hub.aijia_logged_in,
             "apps": [format_app_title(app) for app in tv.apps if format_app_title(app)],
+            "installed_apps": [app_summary(app) for app in tv.apps],
             "custom_sources": [
                 {
                     "name": item["name"],
@@ -279,6 +363,38 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
                 for item in self.hub.custom_sources
             ],
         }
+
+
+def _apps_empty_message(hub: HisenseTvHub) -> str:
+    if hub.aijia_logged_in:
+        account = (hub.aijia.username if hub.aijia else "") or ""
+        who = f"（{account}）" if account else ""
+        return (
+            f"已登录爱家{who}，但没有拉到「我的应用」。"
+            "请确认这台电视已绑定到该账号，并查看 Home Assistant 日志里的「爱家」。"
+        )
+    return "请在集成选项登录爱家账号后再打开「我的应用」。提交账号后令牌会立刻生效，不必等选项菜单里的「保存」。"
+
+
+def _apps_placeholder(logged_in: bool) -> BrowseMedia:
+    """Keep 浏览媒体 from rendering HA's empty 「没有项目」dialog.
+
+    Must not be MediaType.APP: the more-info browser still calls play_media
+    on APP rows even when can_play is False.
+    """
+    title = (
+        "已登录爱家，点这里重新加载「我的应用」"
+        if logged_in
+        else "请在集成选项登录爱家账号以加载「我的应用」"
+    )
+    return BrowseMedia(
+        title=title,
+        media_class=MediaClass.DIRECTORY,
+        media_content_id="apps-refresh",
+        media_content_type=MediaType.APPS,
+        can_play=False,
+        can_expand=True,
+    )
 
 
 def _app_item(app: dict[str, Any]) -> BrowseMedia:

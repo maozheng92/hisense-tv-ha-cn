@@ -82,6 +82,7 @@ def test_pair_topic_and_subscriptions_are_concrete(proto_client, proto_credentia
     subs = proto_topics.subscription_topics(creds)
     assert subs[0] == "/remoteapp/#"
     assert subs[1] == "/remoteapp/mobile/broadcast/ui_service/state"
+    assert any(item.endswith("/data/applist") for item in subs)
     assert "/remoteapp/mobile/broadcast/ui_service/state" in subs
     assert "/remoteapp/mobile/broadcast/ui_service/data/state" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep" in subs
@@ -115,6 +116,11 @@ def test_volume_and_source_parsing(proto_client) -> None:
     client._apply_state({"statetype": "remote_launcher", "sourcename": "HDMI1"})
     assert client.state.power_on is True
     assert client.state.statetype == "remote_launcher"
+    client._apply_state({"statetype": "app", "name": "云视听极光", "url": "com.ktcp.video"})
+    assert client.state.current_app == "云视听极光"
+    assert client.state.source_name == "云视听极光"
+    client._apply_state({"statetype": "livetv", "channel_name": "CCTV1"})
+    assert client.state.current_app is None
 
 
 def test_token_issuance_replaces_the_pairing_secret(proto_client) -> None:
@@ -447,14 +453,44 @@ def test_set_volume_steps_via_keys(proto_client, proto_credentials, monkeypatch)
     assert client.state.volume == 13
 
 
-def test_on_connect_requests_getvolume(proto_client, proto_credentials) -> None:
+def test_applist_message_fills_installed_apps(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    payload = (
+        b'[{"name":"Netflix","url":"netflix","urlType":37,"appId":"netflix"},'
+        b'{"name":"Plex","url":"com.plexapp.android","urlType":0,"isLocalApp":1}]'
+    )
+    client._handle_message(
+        "/remoteapp/mobile/broadcast/ui_service/data/applist", payload
+    )
+    assert [item["name"] for item in client.state.apps] == ["Netflix", "Plex"]
+    assert client.state.apps[1]["url"] == "com.plexapp.android"
+
+
+def test_on_connect_does_not_request_vidaa_applist(
+    proto_client, proto_credentials, monkeypatch
+) -> None:
+    """爱家 我的应用 is cloud columns; do not probe VIDAA applist on connect."""
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     creds = proto_credentials.generate_dynamic_credentials(
         "aa:bb:cc:dd:ee:ff", timestamp=1
     )
     client._creds = creds
-    subscribed: list[str] = []
     published: list[tuple[str, str]] = []
+    subscribed: list[str] = []
+
+    class ImmediateTimer:
+        def __init__(self, delay, function, args=None, kwargs=None):
+            del delay
+            self.function = function
+            self.args = args or ()
+            self.kwargs = kwargs or {}
+            self.daemon = True
+
+        def start(self):
+            self.function(*self.args, **self.kwargs)
+
+        def cancel(self):
+            return None
 
     class FakeMqtt:
         def subscribe(self, topic, qos=0):
@@ -471,6 +507,7 @@ def test_on_connect_requests_getvolume(proto_client, proto_credentials) -> None:
 
             return Info()
 
+    monkeypatch.setattr(proto_client.threading, "Timer", ImmediateTimer)
     mqtt_client = FakeMqtt()
     client._client = mqtt_client
     client._on_connect(mqtt_client, None, {}, 0)
@@ -479,10 +516,9 @@ def test_on_connect_requests_getvolume(proto_client, proto_credentials) -> None:
         creds.client_id in topic and topic.endswith("/data/volumechange")
         for topic in subscribed
     )
-    assert any(topic.endswith("/actions/getvolume") for topic, _ in published)
-    assert any(topic.endswith("/actions/gettvstate") for topic, _ in published)
     assert not any(topic.endswith("/actions/applist") for topic, _ in published)
-    client.state.pin_requested = True
-    published.clear()
-    client._on_connect(mqtt_client, None, {}, 0)
     assert not any(topic.endswith("/actions/getvolume") for topic, _ in published)
+    published.clear()
+    client.refresh_status()
+    assert not any(topic.endswith("/actions/applist") for topic, _ in published)
+    assert any(topic.endswith("/actions/getvolume") for topic, _ in published)

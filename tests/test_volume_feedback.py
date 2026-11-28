@@ -1,8 +1,10 @@
 """Inbound volume/mute must change media_player 0–1 level and mute flag.
 
-This E7N never publishes platform_service volumechange. It IS eARC:
-OSD / gettvstate use volume_type=1 (sehaas/pyvidaa ignore that). Mute from
-爱家 is volume_type=2 on the same ui_service/state path, or mute_status.
+爱家 7.0.8.12 has no TV volume/mute telemetry (no volume_value, mute_status,
+getvolume). Mute is a local remoter icon. This E7N also never publishes
+platform_service volumechange. When an OSD / gettvstate does arrive it uses
+volume_type=1 (eARC; sehaas/pyvidaa ignore that). Type 2 / mute_status is
+mute if the TV ever sends it.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ def test_ui_service_osd_type1_sets_volume_level(proto_client) -> None:
     assert client.state.volume == 18
     assert client.state.volume_type == 1
     assert client.state.media_volume_level() == 0.18
-    assert client.state.media_is_volume_muted() is False
+    assert client.state.media_is_volume_muted() is None
     assert "ui_service/state" in (client.state.volume_topic or "")
 
 
@@ -154,3 +156,51 @@ def test_refresh_volume_state_does_not_applist(
     client.refresh_volume_state()
     assert {action for _s, action, _p, _k in calls} == {"gettvstate", "getvolume"}
     assert not any(action == "applist" for _s, action, _p, _k in calls)
+
+
+def test_unknown_mute_is_not_shown_as_unmuted(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    assert client.state.muted is None
+    assert client.state.media_is_volume_muted() is None
+
+
+def test_key_mute_toggles_like_aijia_button(proto_client, monkeypatch) -> None:
+    """爱家 _buttonMute: first KEY_MUTE from unknown → muted, then toggle."""
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    client._control_warmup = False
+    client._last_remoter_ok_at = 10_000.0
+    keys: list[str] = []
+    calls: list[tuple] = []
+
+    def publish_action(service, action, payload, *, as_key=False):
+        calls.append((service, action, payload, as_key))
+
+    monkeypatch.setattr(client, "_publish_action", publish_action)
+    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
+    monkeypatch.setattr(
+        proto_client, "send_local_key", lambda host, key, **kwargs: keys.append(key) or 200
+    )
+    client.send_key("KEY_MUTE")
+    assert keys == ["KEY_MUTE"]
+    assert client.state.muted is True
+    assert client.state.media_is_volume_muted() is True
+    client.send_key("KEY_MUTE")
+    assert keys == ["KEY_MUTE", "KEY_MUTE"]
+    assert client.state.muted is False
+    assert client.state.media_is_volume_muted() is False
+    assert {action for _s, action, _p, _k in calls} == {"gettvstate", "getvolume"}
+
+
+def test_failed_mute_key_does_not_toggle(proto_client, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    monkeypatch.setattr(client, "_publish_action", lambda *a, **k: None)
+    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: None)
+    try:
+        client.send_key("KEY_MUTE")
+    except ConnectionError:
+        pass
+    assert client.state.muted is None
+    assert client.state.media_is_volume_muted() is None

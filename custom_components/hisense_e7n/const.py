@@ -14,6 +14,17 @@ CONF_CLIENT_KEY = "client_key"
 CONF_ACCESS_TOKEN = "access_token"
 CONF_REFRESH_TOKEN = "refresh_token"
 CONF_CONTROL_USERNAME = "control_username"
+# 爱家云账号（与 VIDAA MQTT access_token 分开，不能复用那两个键）。
+CONF_AIJIA_USERNAME = "aijia_username"
+CONF_AIJIA_PASSWORD = "aijia_password"
+CONF_AIJIA_ACCESS_TOKEN = "aijia_access_token"
+CONF_AIJIA_REFRESH_TOKEN = "aijia_refresh_token"
+CONF_AIJIA_CUSTOMER_ID = "aijia_customer_id"
+CONF_AIJIA_DEVICE_ID = "aijia_device_id"
+CONF_AIJIA_WIFI_ID = "aijia_wifi_id"
+CONF_AIJIA_TV_LOGIN_ID = "aijia_tv_login_id"
+CONF_AIJIA_TOKEN_OBTAINED_AT = "aijia_token_obtained_at"
+CONF_AIJIA_TOKEN_TTL = "aijia_token_ttl"
 CONF_POWER_ON_BUTTON = "power_on_button"
 CONF_POWER_ON_MODE = "power_on_mode"
 CONF_POWER_ON_REMOTE = "power_on_remote"
@@ -66,9 +77,6 @@ VOLUME_UNKNOWN_FLOOR_STEPS = 100
 # LAN remoter KEY (volume +/-) can drop MQTT 36669 for a moment. Do not flip
 # media_player on→off→on until the broker stays down this long.
 MQTT_DISCONNECT_GRACE = 3.0
-# This E7N never publishes volumechange. Catch 爱家 / OSD via gettvstate
-# + getvolume while ON. 3s is short enough for mute OSD, not a CEC flood.
-VOLUME_POLL_SECONDS = 3.0
 CONF_CUSTOM_SOURCE_NAME = "custom_source_name"
 CONF_SOURCE_NAME_ACTION = "source_name_action"
 CONF_SEQUENCE_BUTTON = "sequence_button"

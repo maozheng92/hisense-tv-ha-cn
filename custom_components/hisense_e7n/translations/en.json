@@ -53,6 +53,18 @@
           "音量加按钮": "可选。填写后，媒体播放器音量加会按下这个按钮/开关/脚本，不再发电视 LAN 键。",
           "音量减按钮": "可选。填写后，媒体播放器音量减会按下这个按钮/开关/脚本，不再发电视 LAN 键。"
         }
+      },
+      "account": {
+        "title": "爱家 account",
+        "description": "Optional. Phone number and password load 「我的应用」 from the 爱家 cloud column API. Leave both empty to skip. SMS-only accounts need a password set in 爱家 first.",
+        "data": {
+          "aijia_username": "Phone / 爱家 account",
+          "aijia_password": "Password"
+        },
+        "data_description": {
+          "aijia_username": "The same mobile number used in 海信爱家. Leave empty to skip.",
+          "aijia_password": "Not stored. Tokens are kept instead. Leave empty to skip."
+        }
       }
     },
     "error": {
@@ -62,7 +74,9 @@
       "not_authorized": "MQTT connected but the TV rejected the login (rc=5). Keep auth mode on auto, set the TV clock/timezone correctly, and retry.",
       "cannot_connect_ble": "Could not pair over Bluetooth.",
       "power_on_required": "This power-on method needs the matching entity, IR command, or Wi-Fi MAC.",
-      "volume_button_invalid": "Pick a button, switch, or script entity."
+      "volume_button_invalid": "Pick a button, switch, or script entity.",
+      "invalid_auth": "爱家 rejected the account or password.",
+      "aijia_connect": "Could not reach 爱家 account servers."
     },
     "abort": {
       "already_configured": "This TV is already configured.",
@@ -73,12 +87,13 @@
     "step": {
       "init": {
         "title": "Hisense E7N Pro options",
-        "description": "Power-on: {power_on}\nVolume +/-: {volume_up} / {volume_down}\nInput sources: {source_count}. Changes apply only after Save.",
+        "description": "爱家: {aijia}\nPower-on: {power_on}\nVolume +/-: {volume_up} / {volume_down}\nInput sources: {source_count}",
         "menu_options": {
           "connection": "Connection",
           "power_on": "Power on",
           "volume": "Volume buttons",
           "sources": "Input sources",
+          "account": "爱家 account",
           "save": "Save"
         }
       },
@@ -136,6 +151,19 @@
         "data_description": {
           "音量加按钮": "可选。音量加会按下这个实体，不再发电视 LAN 键。",
           "音量减按钮": "可选。音量减会按下这个实体，不再发电视 LAN 键。"
+        },
+        "submit": "Submit"
+      },
+      "account": {
+        "title": "爱家 account",
+        "description": "爱家: {aijia}. Submit writes tokens immediately so 浏览媒体 can load 我的应用 before you Save the rest of the options. Submit with an empty account to log out. Password is not stored.",
+        "data": {
+          "aijia_username": "Phone / 爱家 account",
+          "aijia_password": "Password"
+        },
+        "data_description": {
+          "aijia_username": "Clear this field and submit to remove the 爱家 session.",
+          "aijia_password": "Required to log in or replace the session. Leave empty to keep the current tokens."
         },
         "submit": "Submit"
       },
@@ -271,7 +299,9 @@
       "remote_required": "Select an IR remote.",
       "unknown_source": "That source is not in the list.",
       "power_on_required": "This power-on method needs the matching entity, IR command, or Wi-Fi MAC.",
-      "volume_button_invalid": "Pick a button, switch, or script entity."
+      "volume_button_invalid": "Pick a button, switch, or script entity.",
+      "invalid_auth": "爱家 rejected the account or password.",
+      "aijia_connect": "Could not reach 爱家 account servers."
     }
   },
   "entity": {
@@ -303,17 +333,21 @@
     },
     "launch_app": {
       "name": "Launch app",
-      "description": "Launch an installed VIDAA app by name.",
+      "description": "Open by speaking 打开{name} on LAN /..pushwechatvoice (same channel as 信号源 / 识图). Packages are not sent to MQTT launchapp or /..pushsmartju. After 爱家 login, browse media lists cloud 我的应用.",
       "fields": {
         "name": {
           "name": "App name",
-          "description": "Display name, for example Netflix."
+          "description": "Display name, for example 云视听极光."
         },
         "url": {
-          "name": "App URL / id",
-          "description": "Optional store url such as netflix."
+          "name": "App URL / package",
+          "description": "Optional store url or Android package."
         }
       }
+    },
+    "refresh_apps": {
+      "name": "Refresh my apps",
+      "description": "Reload 我的应用 from the 爱家 cloud when an account is logged in. Otherwise probe VIDAA MQTT applist."
     }
   }
 }

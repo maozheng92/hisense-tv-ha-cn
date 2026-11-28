@@ -20,7 +20,7 @@ from typing import Any
 import paho.mqtt.client as mqtt
 
 from . import topics
-from .apps import normalize_apps
+from .apps import build_launch_payload, normalize_apps, resolve_app
 from .certs_util import build_ssl_context
 from .const import (
     DEFAULT_PORT,
@@ -277,6 +277,7 @@ class TvState:
     source_name: str | None = None
     sources: list[dict[str, str]] = field(default_factory=list)
     apps: list[dict[str, Any]] = field(default_factory=list)
+    current_app: str | None = None
     auth_mode: str | None = None
     last_error: str | None = None
     needs_pin: bool = False
@@ -295,8 +296,10 @@ class TvState:
         return max(0.0, min(1.0, float(self.volume) / 100.0))
 
     def media_is_volume_muted(self) -> bool | None:
-        """Home Assistant ``is_volume_muted``. Unknown while the TV is off."""
+        """Home Assistant ``is_volume_muted``. Unknown until a mute event."""
         if not self.available:
+            return None
+        if self.muted is None:
             return None
         return bool(self.muted)
 
@@ -345,6 +348,7 @@ class HisenseTvClient:
         self._pin_event: asyncio.Event | None = None
         self._token_event: asyncio.Event | None = None
         self._apps_event: asyncio.Event | None = None
+        self._apps_timers: list[threading.Timer] = []
         self._connect_rc: int = -1
         self._lock = threading.Lock()
         self.ble: Any = None
@@ -517,6 +521,19 @@ class HisenseTvClient:
             }
             if kind == "livetv":
                 self.state.source_name = data.get("channel_name") or name or "TV"
+                self.state.current_app = None
+            elif kind == "app":
+                app_name = str(
+                    data.get("name") or data.get("appName") or data.get("curAppName") or ""
+                ).strip()
+                app_url = str(data.get("url") or data.get("packageName") or "").strip()
+                self.state.current_app = app_name or app_url or None
+                if app_name:
+                    self.state.source_name = app_name
+            elif kind in {"sourceswitch", "remote_launcher"}:
+                self.state.current_app = None
+            elif not self.state.power_on:
+                self.state.current_app = None
         self._apply_volume_tree(data, topic=topic)
         self._maybe_learn_tv_mac(data)
 
@@ -557,6 +574,27 @@ class HisenseTvClient:
         if apps:
             self.state.apps = apps
             self._set_loop_event(self._apps_event)
+            _LOGGER.info(
+                "我的应用: %s app(s) %s",
+                len(apps),
+                [item.get("name") for item in apps[:20]],
+            )
+            return
+        if data not in (None, "", [], {}):
+            _LOGGER.info("applist payload did not parse as installed apps: %s", data)
+
+    def apply_cloud_apps(self, apps: list[dict[str, Any]]) -> None:
+        """Replace 我的应用 with rows from the 爱家 cloud column API."""
+        if not apps:
+            return
+        self.state.apps = list(apps)
+        self._set_loop_event(self._apps_event)
+        _LOGGER.info(
+            "爱家云 我的应用: %s app(s) %s",
+            len(apps),
+            [item.get("name") for item in apps[:20]],
+        )
+        self._notify()
 
     def _handle_message(self, topic: str, payload: bytes) -> None:
         data = _loads(payload)
@@ -601,7 +639,8 @@ class HisenseTvClient:
             self._apply_state(data, topic=topic)
         elif topic.endswith("/data/sourcelist"):
             self._apply_sources(data)
-        elif "applist" in topic:
+        elif "applist" in topic.lower() or topic.lower().endswith("/data/app_list"):
+            _LOGGER.info("MQTT applist topic %s", topic)
             self._apply_apps(data)
         elif "volume" in topic:
             self._apply_volume_tree(data, topic=topic)
@@ -634,12 +673,10 @@ class HisenseTvClient:
             )
         self._set_loop_event(self._connected_event)
         self._notify()
-        # Skip while the PIN dialog is up — status queries can dismiss it.
-        if not self.state.needs_pin and not self.state.pin_requested:
-            try:
-                self.refresh_volume_state()
-            except (ConnectionError, RuntimeError, OSError):
-                _LOGGER.debug("gettvstate/getvolume after CONNECT failed", exc_info=True)
+        # 爱家 我的应用 is a cloud launcher column, not VIDAA MQTT applist.
+        # Do not publish actions/applist on connect: this E7N stays silent.
+        # 爱家 TV remoter also never polls getvolume / mute_status; mute is a
+        # local icon. Keep OSD parse on inbound state, do not probe here.
 
     def _cancel_offline_timer(self) -> None:
         with self._offline_lock:
@@ -901,6 +938,7 @@ class HisenseTvClient:
         self._stop.set()
         self._mqtt_epoch += 1
         self._cancel_offline_timer()
+        self._cancel_apps_timers()
         client = self._client
         self._client = None
         if client is None:
@@ -970,6 +1008,7 @@ class HisenseTvClient:
         if status is not None and 200 <= status < 300:
             self._note_remoter_ok()
             if name == KEY_MUTE:
+                self._note_mute_toggle()
                 self.refresh_volume_state()
             return
         if not self.mqtt_connected:
@@ -984,6 +1023,7 @@ class HisenseTvClient:
         _LOGGER.info("HTTP remote did not take %s (status %s); trying MQTT", name, status)
         self._publish_action("remote_service", "sendkey", key, as_key=True)
         if name == KEY_MUTE:
+            self._note_mute_toggle()
             self.refresh_volume_state()
 
     def submit_code(self, code: str) -> None:
@@ -1137,6 +1177,15 @@ class HisenseTvClient:
         if self.state.volume is None:
             return
         self.state.volume = max(0, min(100, int(self.state.volume) + int(delta)))
+        self._notify()
+
+    def _note_mute_toggle(self) -> None:
+        """爱家 remoter mute is a local icon (``_buttonMute``), not TV telemetry.
+
+        First successful KEY_MUTE from unknown → muted. Later OSD / mute_status
+        overwrites this if the TV ever publishes it.
+        """
+        self.state.muted = True if self.state.muted is None else (not self.state.muted)
         self._notify()
 
     def _is_arc_audio(self) -> bool:
@@ -1304,51 +1353,86 @@ class HisenseTvClient:
         store_type: int = 0,
         package: str | None = None,
     ) -> None:
-        """Open an app. Prefer LAN 「电视打开」 when the target is a package."""
+        """Open an app. Prefer LAN voice 打开{name} when the target is a package."""
         app_url = (url or package or name or "").strip()
         pkg = (package or "").strip()
         if not is_android_package(pkg):
             pkg = app_url if is_android_package(app_url) else ""
-        if not pkg:
-            for app in self.state.apps:
-                if str(app.get("name") or "") == name or str(app.get("url") or "") == app_url:
-                    candidate = str(app.get("package") or app.get("url") or "")
-                    if is_android_package(candidate):
-                        pkg = candidate
-                        url_type = int(app.get("url_type") or url_type)
-                        break
+        matched = (
+            resolve_app(self.state.apps, name)
+            or resolve_app(self.state.apps, app_url)
+            or (resolve_app(self.state.apps, pkg) if pkg else None)
+        )
+        if matched is not None:
+            candidate = str(matched.get("package") or matched.get("url") or "")
+            if not pkg and is_android_package(candidate):
+                pkg = candidate
+            url_type = int(matched.get("url_type") if matched.get("url_type") is not None else url_type)
+            store_type = int(
+                matched.get("store_type") if matched.get("store_type") is not None else store_type
+            )
+            name = str(matched.get("name") or name)
+            app_url = str(matched.get("url") or pkg or app_url or name)
         if pkg:
-            status = launch_local_app(self.host, pkg)
+            status = launch_local_app(self.host, pkg, name=name)
             if status is not None and 200 <= status < 300:
+                self.state.current_app = name or pkg
+                self._notify()
                 return
-            _LOGGER.info("Local 电视打开 did not take %s (status %s); trying MQTT", pkg, status)
-            payload = {
-                "name": name or pkg,
-                "url": pkg,
-                "appId": pkg,
-                "urlType": 0,
-                "storeType": int(store_type),
-                "isLocalApp": 1,
-                "has_detail_page": 0,
-                "type": 0,
-            }
-            self._publish_action("ui_service", "launchapp", payload)
-            return
-        payload = {
-            "name": name,
-            "url": app_url,
-            "appId": app_url,
-            "urlType": int(url_type),
-            "storeType": int(store_type),
-        }
+            label = name or pkg
+            _LOGGER.warning(
+                "Local 电视打开 did not take %s (status %s); not using MQTT launchapp",
+                pkg,
+                status,
+            )
+            if status is None:
+                raise RuntimeError(f"电视没有响应打开 {label}")
+            raise RuntimeError(f"电视拒绝打开 {label}（HTTP {status}）")
+        payload = build_launch_payload(
+            matched,
+            name=name,
+            url=app_url,
+            url_type=url_type,
+            store_type=store_type,
+            package=package,
+            is_local=False,
+        )
         self._publish_action("ui_service", "launchapp", payload)
+        self.state.current_app = payload["name"]
+        self._notify()
+
+    def _cancel_apps_timers(self) -> None:
+        timers = self._apps_timers
+        self._apps_timers = []
+        for timer in timers:
+            timer.cancel()
+
+    def _schedule_refresh_apps(self) -> None:
+        """Request 我的应用 after SUBSCRIBE, then once more if still empty."""
+        self._cancel_apps_timers()
+        for delay in (0.8, 3.0):
+            timer = threading.Timer(delay, self._refresh_apps_if_empty)
+            timer.daemon = True
+            self._apps_timers.append(timer)
+            timer.start()
+
+    def _refresh_apps_if_empty(self) -> None:
+        if self._stop.is_set() or self.state.apps:
+            return
+        if self.state.needs_pin or self.state.pin_requested:
+            return
+        try:
+            self.refresh_apps()
+        except (ConnectionError, RuntimeError, OSError):
+            _LOGGER.debug("Delayed applist request failed", exc_info=True)
 
     def refresh_apps(self) -> None:
-        """Ask the TV for 我的应用. The reply arrives on the applist data topic."""
+        """Probe VIDAA MQTT ``applist`` (RemoteNOW). 爱家 does not use this."""
         try:
             self._publish_action("ui_service", "applist", "")
+            _LOGGER.info("Requested VIDAA MQTT applist (not 爱家 我的应用)")
         except RuntimeError:
-            _LOGGER.debug("Cannot request the TV app list", exc_info=True)
+            _LOGGER.debug("Cannot request VIDAA MQTT applist", exc_info=True)
 
     def change_channel(self, channel_param: str) -> None:
         self._publish_action(
@@ -1374,7 +1458,6 @@ class HisenseTvClient:
 
     def refresh_status(self) -> None:
         self.refresh_volume_state()
-        self.refresh_apps()
 
     def _refresh_control_password(self) -> None:
         refresh = {"refreshtoken": self.state.refresh_token}
@@ -1535,5 +1618,3 @@ class HisenseTvClient:
 
     async def async_toggle_mute(self) -> None:
         await self.async_send_key("KEY_MUTE")
-        self.state.muted = not bool(self.state.muted)
-        self._notify()

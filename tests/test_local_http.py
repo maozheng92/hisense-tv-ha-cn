@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import io
+import json
 import urllib.error
+
+import pytest
 
 
 class _Response(io.BytesIO):
@@ -222,24 +225,72 @@ def test_send_key_stops_after_http_accepts(proto_client, proto_credentials, monk
     assert published == []
 
 
-def test_launch_local_app_posts_pushsmartju(proto_local_http, monkeypatch) -> None:
+def test_fetch_device_identity_reads_deviceid(proto_local_http, monkeypatch) -> None:
+    seen: list[str] = []
+
+    def fake_urlopen(request, timeout=0):
+        del timeout
+        seen.append(request.full_url)
+        if request.full_url.endswith(":7779/..deviceid"):
+            return _Body(200, b'{"ticket":"lan-ticket","wifiId":"aabbccddeeff"}')
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(proto_local_http.urllib.request, "urlopen", fake_urlopen)
+    identity = proto_local_http.fetch_device_identity("192.0.2.10", timeout=0.1)
+    assert identity == {"ticket": "lan-ticket", "wifiId": "aabbccddeeff"}
+    assert seen[0].endswith("/..deviceid")
+
+
+def test_launch_local_app_opens_by_voice(proto_local_http, monkeypatch) -> None:
     seen: list[tuple[str, bytes | None]] = []
 
     def fake_urlopen(request, timeout=0):
         del timeout
         seen.append((request.full_url, request.data))
-        if request.full_url.endswith(":7779/..pushsmartju"):
+        if request.full_url.endswith(":7779/..pushwechatvoice"):
             return _Response(200)
         raise urllib.error.URLError("refused")
 
     monkeypatch.setattr(proto_local_http.urllib.request, "urlopen", fake_urlopen)
-    status = proto_local_http.launch_local_app("192.0.2.10", "com.ktcp.video", timeout=0.1)
+    status = proto_local_http.launch_local_app(
+        "192.0.2.10",
+        "com.jamdeo.tv.mediacenter",
+        name="媒体中心",
+        timeout=0.1,
+    )
     assert status == 200
-    assert seen[0][0] == "http://192.0.2.10:7779/..pushsmartju"
-    assert b'"packageName"' in seen[0][1]
-    assert b"com.ktcp.video" in seen[0][1]
+    assert seen[0][0] == "http://192.0.2.10:7779/..pushwechatvoice"
+    body = json.loads(seen[0][1].decode())
+    assert body["voice"] == "打开媒体中心"
+    assert body["msgchannel"] == 1
+    assert body["msgresource"] == 4
+    assert body["msgtype"] == 6
+    assert proto_local_http.open_app_voice_phrase("媒体中心", "com.jamdeo.tv.mediacenter") == "打开媒体中心"
     assert proto_local_http.is_android_package("com.ktcp.video")
     assert not proto_local_http.is_android_package("netflix")
+
+
+def test_launch_local_app_does_not_push_media(proto_local_http, monkeypatch) -> None:
+    seen: list[str] = []
+
+    def fake_urlopen(request, timeout=0):
+        del timeout
+        seen.append(request.full_url)
+        if request.full_url.endswith("/..pushwechatvoice"):
+            return _Body(400, b"no")
+        return _Response(200)
+
+    monkeypatch.setattr(proto_local_http.urllib.request, "urlopen", fake_urlopen)
+    status = proto_local_http.launch_local_app(
+        "192.0.2.10",
+        "com.android.tv.settings",
+        name="设置",
+        timeout=0.1,
+    )
+    assert status == 400
+    assert seen
+    assert all("/..pushsmartju" not in url for url in seen)
+    assert all("/..commonstarttvapp" not in url for url in seen)
 
 
 def test_launch_app_prefers_local_package(proto_client, monkeypatch) -> None:
@@ -259,6 +310,77 @@ def test_launch_app_prefers_local_package(proto_client, monkeypatch) -> None:
             return Info()
 
     client._client = FakeMqtt()
-    monkeypatch.setattr(proto_client, "launch_local_app", lambda host, package, **kwargs: 200)
+    captured: dict[str, str] = {}
+
+    def fake_launch(host, package, **kwargs):
+        captured["host"] = host
+        captured["package"] = package
+        captured["name"] = kwargs.get("name") or ""
+        return 200
+
+    monkeypatch.setattr(proto_client, "launch_local_app", fake_launch)
     client.launch_app("云视听极光", "com.ktcp.video")
+    assert published == []
+    assert captured["package"] == "com.ktcp.video"
+    assert captured["name"] == "云视听极光"
+    assert client.state.current_app == "云视听极光"
+
+
+def test_launch_app_mqtt_when_local_fails(
+    proto_client, proto_credentials, monkeypatch
+) -> None:
+    published: list[tuple[str, str]] = []
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    client._creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+
+    class FakeMqtt:
+        def publish(self, topic, payload=None, qos=0, retain=False):
+            published.append((topic, payload))
+
+            class Info:
+                rc = proto_client.mqtt.MQTT_ERR_SUCCESS
+
+                def wait_for_publish(self, timeout=None):
+                    return None
+
+            return Info()
+
+    client._client = FakeMqtt()
+    monkeypatch.setattr(proto_client, "launch_local_app", lambda host, package, **kwargs: None)
+    client.launch_app("Netflix", "netflix", url_type=37)
+    assert any(topic.endswith("/actions/launchapp") for topic, _ in published)
+    body = next(payload for topic, payload in published if topic.endswith("/actions/launchapp"))
+    assert '"url":"netflix"' in body
+    assert '"urlType":37' in body
+    assert '"isLocalApp":0' in body
+    assert client.state.current_app == "Netflix"
+
+
+def test_launch_app_local_package_skips_mqtt_on_400(
+    proto_client, proto_credentials, monkeypatch
+) -> None:
+    published: list[tuple[str, str]] = []
+    client = proto_client.HisenseTvClient("192.0.2.10", uuid="aa:bb:cc:dd:ee:ff")
+    client._creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+
+    class FakeMqtt:
+        def publish(self, topic, payload=None, qos=0, retain=False):
+            published.append((topic, payload))
+
+            class Info:
+                rc = proto_client.mqtt.MQTT_ERR_SUCCESS
+
+                def wait_for_publish(self, timeout=None):
+                    return None
+
+            return Info()
+
+    client._client = FakeMqtt()
+    monkeypatch.setattr(proto_client, "launch_local_app", lambda host, package, **kwargs: 400)
+    with pytest.raises(RuntimeError, match="拒绝打开"):
+        client.launch_app("媒体中心", "com.jamdeo.tv.mediacenter")
     assert published == []

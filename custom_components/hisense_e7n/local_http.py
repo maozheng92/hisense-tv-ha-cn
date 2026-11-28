@@ -8,8 +8,13 @@ MQTT session, so it still works when the TV never shows a pairing code.
 ``com.android.wechathci`` via ``/..commonstarttvapp``; the picture is then
 fetched from the TV's upload and saved by the integration.
 
-「电视打开」for an installed Android package is the same-LAN
-``/..pushsmartju`` body with ``startupType`` 4 and ``packageName``.
+Installed apps are opened the same way as 信号源: voice ``打开{应用名}``
+on ``/..pushwechatvoice``. Official web remote LAN control uses that
+channel (``msgtype`` 6). ``/..pushsmartju`` is 聚好看 media push
+(``msgtype`` 2, toast 「正在推送中」) and this E7N shows 播放失败.
+``/..commonstarttvapp`` is the signed screenshot starter, not a generic
+launcher (HTTP 400 with MAIN). MQTT ``launchapp`` with an Android package
+as ``url`` is also 播放失败, so local open never falls back to it.
 """
 
 from __future__ import annotations
@@ -185,39 +190,65 @@ def is_android_package(value: str | None) -> bool:
     return bool(text) and _PACKAGE_RE.fullmatch(text) is not None
 
 
+def open_app_voice_phrase(name: str | None, package: str) -> str:
+    """Spoken 打开 command used by 爱家 / 小聚 for an installed app."""
+    label = (name or "").strip()
+    if label and not is_android_package(label):
+        return f"打开{label}"
+    return f"打开{package.strip()}"
+
+
 def launch_local_app(
     host: str,
     package_name: str,
     *,
-    ports: tuple[int, ...] = APP_PORTS,
+    name: str | None = None,
+    ports: tuple[int, ...] = VOICE_PORTS,
     timeout: float = 2.0,
 ) -> int | None:
-    """Open an installed TV app the same way 爱家 「电视打开」 does on LAN.
-
-    Posts ``/..pushsmartju`` with ``startupType`` 4 and the package name.
-    Return the HTTP status, or None if no port answered.
-    """
+    """Open an installed TV app via LAN voice. Return HTTP status, or None."""
     package = package_name.strip()
     if not is_android_package(package):
         raise ValueError(f"invalid package: {package_name}")
-    body = {
-        "startupType": 4,
-        "startupUrl": [
-            {"key": "startupType", "value": 1, "type": "int"},
-            {"key": "intentFlags", "value": 335544352, "type": "int"},
-            {"key": "packageName", "value": package, "type": "String"},
-        ],
-    }
-    answered: int | None = None
+    phrase = open_app_voice_phrase(name, package)
+    status = push_voice(host, phrase, ports=ports, timeout=timeout)
+    if status is not None and 200 <= status < 300:
+        _LOGGER.info("TV 电视打开 %s via voice %s", package, phrase)
+    else:
+        _LOGGER.info("TV 电视打开 %s voice %s -> %s", package, phrase, status)
+    return status
+
+
+def fetch_device_identity(
+    host: str,
+    *,
+    ports: tuple[int, ...] = APP_PORTS,
+    timeout: float = 1.5,
+) -> dict[str, Any] | None:
+    """GET/POST ``/..deviceid``. Ticket / wifiId for 爱家 IoT when list is empty."""
     for port in ports:
-        result = _exchange(f"http://{host}:{port}/..pushsmartju", body, timeout)
-        if result is None:
-            continue
-        answered = result[0]
-        if 200 <= answered < 300:
-            _LOGGER.info("TV opened %s on port %s", package, port)
-            return answered
-    return answered
+        for method, payload in (("GET", None), ("POST", {})):
+            result = _exchange(
+                f"http://{host}:{port}/..deviceid", payload, timeout, method=method
+            )
+            if result is None:
+                continue
+            status, raw = result
+            if not 200 <= status < 300 or not raw:
+                continue
+            try:
+                payload_json = json.loads(raw.decode("utf-8", "replace"))
+            except (UnicodeError, json.JSONDecodeError):
+                text = raw.decode("utf-8", "replace").strip()
+                if text:
+                    return {"ticket": text}
+                continue
+            if isinstance(payload_json, dict) and payload_json:
+                nested = payload_json.get("data")
+                if isinstance(nested, dict) and nested:
+                    return nested
+                return payload_json
+    return None
 
 
 def fetch_hishare_capacity(
