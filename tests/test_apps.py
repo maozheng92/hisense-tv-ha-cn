@@ -76,6 +76,22 @@ def test_resolve_app_matches_package_name_and_substring() -> None:
     assert apps.app_media_id(parsed[0]) == "com.ktcp.video"
 
 
+def test_default_launch_apps_are_local_packages() -> None:
+    apps = load_proto("apps")
+    catalog = apps.default_launch_apps()
+    assert [item["name"] for item in catalog] == [
+        "云视听极光",
+        "云视听",
+        "聚好看",
+        "应用商店",
+        "CIBN",
+        "海信视频",
+    ]
+    assert catalog[0]["package"] == "com.ktcp.video"
+    assert catalog[0]["url_type"] == 0
+    assert apps.resolve_app(catalog, "com.jamdeo.tv.vod")["name"] == "聚好看"
+
+
 def test_name_list_and_client_apply(proto_client) -> None:
     apps = load_proto("apps")
     # mqttAppNameList is the 爱家 cloud-column filter field, not VIDAA MQTT.

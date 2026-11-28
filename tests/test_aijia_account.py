@@ -558,9 +558,10 @@ def test_login4tv_sends_token_field() -> None:
         assert updated.tv_login_id == "tv-license-12345678"
         assert [item["name"] for item in apps] == ["云视听极光"]
         assert any(
-            isinstance(body, str) and '"token":"tok"' in body for body in session.bodies
+            isinstance(body, str) and '"token":"tok"' in body and '"sid":' in body
+            for body in session.bodies
         )
-        assert any("token=tok" in url for _method, url in session.calls)
+        assert any("token=tok" in url and "sid=" in url for _method, url in session.calls)
 
     asyncio.run(_run())
 
@@ -621,6 +622,18 @@ def test_activation_string_becomes_ticket() -> None:
         tokens, {"license": "tv-license-from-cloud"}
     )
     assert nested.tv_login_id == "tv-license-from-cloud"
+
+
+def test_column_payload_uses_placeholder_license() -> None:
+    account = _account()
+    tokens = account.AijiaTokens(access_token="tok", customer_id="c1")
+    payload = account._column_payload(tokens)
+    assert payload["license"] == "-1"
+    assert payload["tvLoginedId"] == "-1"
+    filled = account._column_payload(
+        account.AijiaTokens(access_token="tok", customer_id="c1", tv_login_id="lic-12345678")
+    )
+    assert filled["license"] == "lic-12345678"
 
 
 def test_login_id_from_nested_data() -> None:

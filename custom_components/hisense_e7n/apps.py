@@ -115,6 +115,35 @@ def normalize_apps(data: Any) -> list[dict[str, Any]]:
     return apps
 
 
+# 爱家 APK 里写死的 ``/..pushsmartju`` 包名（电视应用页「打开」）。
+# 云栏目拿不到时，浏览媒体仍用这些包名建可点击的打开图标。
+_DEFAULT_LAUNCH_APPS = (
+    ("云视听极光", "com.ktcp.video"),
+    ("云视听", "com.ktcp.csvideo"),
+    ("聚好看", "com.jamdeo.tv.vod"),
+    ("应用商店", "com.hisense.store.tv"),
+    ("CIBN", "com.cibn.tv"),
+    ("海信视频", "com.hisensecpa.tv"),
+)
+
+
+def default_launch_apps() -> list[dict[str, Any]]:
+    """LAN-openable TV apps from the 爱家 APK, used when the cloud list is empty."""
+    return [
+        _record(
+            name,
+            package,
+            package,
+            0,
+            0,
+            None,
+            package,
+            None,
+        )
+        for name, package in _DEFAULT_LAUNCH_APPS
+    ]
+
+
 def format_app_title(app: dict[str, Any]) -> str:
     """Display name like 爱家: ``健身镜 (51.45M)`` when size is known."""
     name = str(app.get("name") or app.get("package") or "").strip()

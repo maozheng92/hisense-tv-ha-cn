@@ -39,7 +39,13 @@ except ImportError:  # pragma: no cover
     ServiceValidationError = HomeAssistantError  # type: ignore[misc,assignment]
 
 from .aijia_account import status_text as aijia_status_text
-from .apps import app_media_id, app_summary, format_app_title, resolve_app
+from .apps import (
+    app_media_id,
+    app_summary,
+    default_launch_apps,
+    format_app_title,
+    resolve_app,
+)
 from .entity import HisenseTvEntity, tv_errors
 from .hub import HisenseTvHub, hub_from_entry
 from .keys import (
@@ -235,6 +241,8 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             await self._async_ensure_cloud_apps(force=True)
             app = resolve_app(self.hub.tv.apps, media_id)
         if app is None:
+            app = resolve_app(default_launch_apps(), media_id)
+        if app is None:
             raise ServiceValidationError(
                 f"Unknown app {media_id!r}; open 我的应用 on this media player"
             )
@@ -258,6 +266,8 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
                 )
                 apps = list(self.hub.tv.apps)
             children = [_app_item(app) for app in apps]
+            if not children:
+                children = [_app_item(app) for app in default_launch_apps()]
             if children:
                 return BrowseMedia(
                     title="我的应用",

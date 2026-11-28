@@ -16,7 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass, replace
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlparse
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -64,6 +64,7 @@ _TV_HINTS = (
     "e7n",
 )
 _LOGIN_OK = {"0", "0.0", "00", "0000", "200", "success", "SUCCESS"}
+DEFAULT_LICENSE = "-1"
 
 
 class AijiaError(Exception):
@@ -499,7 +500,7 @@ async def async_fetch_apps(
         (current.com_module_id or "-")[:16],
         (current.tv_login_id or "-")[:12],
         summaries,
-        "; ".join(traces[:24]) or "-",
+        "; ".join(traces[:40]) or "-",
     )
     return current, []
 
@@ -728,6 +729,13 @@ async def _enrich_device(
                     "name": "mqttAppNameList",
                     "names": ["mqttAppNameList"],
                     "stateName": "mqttAppNameList",
+                    "devices": [
+                        {
+                            "deviceId": tokens.device_id,
+                            "wifiId": tokens.wifi_id,
+                            "comModuleId": tokens.com_module_id,
+                        }
+                    ],
                 },
             )
         )
@@ -774,9 +782,11 @@ async def _try_tv_login_id(
     session: Any, tokens: AijiaTokens, traces: list[str] | None = None
 ) -> AijiaTokens:
     traces = traces if traces is not None else []
+    sid = str(uuid.uuid4())
     payload = {
         "token": tokens.access_token,
         "accessToken": tokens.access_token,
+        "sid": sid,
         "customerId": tokens.customer_id,
         "deviceId": tokens.device_id,
         "wifiId": tokens.wifi_id,
@@ -786,26 +796,15 @@ async def _try_tv_login_id(
     }
     payload = {key: value for key, value in payload.items() if value}
     body = compact_json(payload)
-    form = urlencode(payload)
     query = {
         "token": tokens.access_token,
         "accessToken": tokens.access_token,
+        "sid": sid,
     }
-    attempts: list[tuple[str, str, dict[str, str], str | None, dict[str, str]]] = [
-        ("POST", body, signed_headers(body, tokens.access_token), body, query),
-        (
-            "POST",
-            form,
-            {
-                **signed_headers(form, tokens.access_token),
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            form,
-            query,
-        ),
+    attempts: list[tuple[str, dict[str, str], str | None, dict[str, str]]] = [
+        ("POST", signed_headers(body, tokens.access_token), body, query),
         (
             "GET",
-            "",
             signed_headers(
                 "&".join(f"{key}={query[key]}" for key in sorted(query)),
                 tokens.access_token,
@@ -814,7 +813,7 @@ async def _try_tv_login_id(
             query,
         ),
     ]
-    for method, _signed, headers, data, params in attempts:
+    for method, headers, data, params in attempts:
         try:
             status, result = await _request_json(
                 session,
@@ -860,8 +859,8 @@ async def _column_candidates(
             "comModuleId": tokens.com_module_id,
             "customerId": tokens.customer_id,
             "accessToken": tokens.access_token,
-            "tvLoginedId": tokens.tv_login_id,
-            "license": tokens.tv_login_id,
+            "tvLoginedId": _tv_license(tokens),
+            "license": _tv_license(tokens),
             "partnerId": tokens.partner_id,
             "homeId": tokens.home_id,
             "serverCode": SERVER_CODE,
@@ -934,9 +933,9 @@ def _identity_headers(tokens: AijiaTokens) -> dict[str, str]:
         "deviceId": tokens.device_id,
         "wifiId": tokens.wifi_id,
         "comModuleId": tokens.com_module_id,
-        "tvLoginedId": tokens.tv_login_id,
-        "tvToken": tokens.tv_login_id,
-        "license": tokens.tv_login_id,
+        "tvLoginedId": _tv_license(tokens),
+        "tvToken": _tv_license(tokens),
+        "license": _tv_license(tokens),
         "distributeId": DISTRIBUTE_ID,
         "serverCode": SERVER_CODE,
         "versionName": APP_VERSION,
@@ -963,8 +962,8 @@ def _column_payload(tokens: AijiaTokens) -> dict[str, Any]:
         "comModuleId": tokens.com_module_id,
         "partnerId": tokens.partner_id,
         "homeId": tokens.home_id,
-        "tvLoginedId": tokens.tv_login_id,
-        "license": tokens.tv_login_id,
+        "tvLoginedId": _tv_license(tokens),
+        "license": _tv_license(tokens),
     }
     return {key: value for key, value in payload.items() if value not in ("", None)}
 
@@ -1239,9 +1238,22 @@ def _device_summary(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _tv_license(tokens: AijiaTokens) -> str:
+    """Columns treat a missing license as null; 爱家小程序用 ``-1`` 占位。"""
+    return tokens.tv_login_id or DEFAULT_LICENSE
+
+
 def _summarize_json(data: Any) -> str:
     if data in (None, "", [], {}):
         return "empty"
+    if isinstance(data, list):
+        bits: list[str] = []
+        for item in data[:3]:
+            if isinstance(item, dict):
+                bits.append("{" + ",".join(str(key) for key in list(item)[:8]) + "}")
+            else:
+                bits.append(str(item)[:32])
+        return f"list:{len(data)} {' '.join(bits)}"[:160]
     if not isinstance(data, dict):
         text = str(data)
         return text[:80] if text else type(data).__name__
