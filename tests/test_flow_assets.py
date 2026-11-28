@@ -140,11 +140,19 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_25_0() -> None:
+def test_version_is_1_25_1() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.25.0"
+    assert manifest["version"] == "1.25.1"
     assert not (_ROOT / "www").exists()
     assert not (_ROOT / "select.py").exists()
+
+
+def test_browse_media_is_always_advertised() -> None:
+    text = (_ROOT / "media_player.py").read_text(encoding="utf-8")
+    base = text.split("_BASE_SUPPORT = (", 1)[1].split(")", 1)[0]
+    assert "MediaPlayerEntityFeature.BROWSE_MEDIA" in base
+    features = text.split("def supported_features", 1)[1].split("def state", 1)[0]
+    assert "hub.tv.apps" not in features
 
 
 def test_sources_menu_save_is_footer_not_row() -> None:

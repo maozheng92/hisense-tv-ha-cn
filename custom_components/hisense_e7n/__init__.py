@@ -149,7 +149,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await hub.async_refresh_aijia_apps()
     except Exception:  # noqa: BLE001
-        _LOGGER.warning("爱家云我的应用加载失败，媒体浏览器暂不显示应用列表", exc_info=True)
+        _LOGGER.warning("爱家云我的应用加载失败，浏览媒体里会提示登录或列表为空", exc_info=True)
     async_remove_legacy_button_entities(hass, entry)
 
     entry.runtime_data = hub
