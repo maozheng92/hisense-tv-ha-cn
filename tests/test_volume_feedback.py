@@ -158,6 +158,45 @@ def test_refresh_volume_state_does_not_applist(
     assert not any(action == "applist" for _s, action, _p, _k in calls)
 
 
+def test_volume_key_from_unknown_moves_ha_slider(proto_client, monkeypatch) -> None:
+    """HA volume_level stays None until a KEY; then assume 20 and step."""
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    client._control_warmup = False
+    client._last_remoter_ok_at = 10_000.0
+    client._last_volume_deliver_at = 0.0
+    monkeypatch.setattr(client, "_publish_action", lambda *a, **k: None)
+    monkeypatch.setattr(proto_client, "remoter_reachable", lambda host, **kwargs: True)
+    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: 200)
+    assert client.state.media_volume_level() is None
+    assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
+    assert client.state.volume == 21
+    assert client.state.media_volume_level() == 0.21
+    client._handle_message(
+        "/remoteapp/mobile/broadcast/ui_service/state",
+        b'{"volume_value": 18, "volume_type": 1, "state": 1}',
+    )
+    assert client.state.volume == 18
+    assert client.state.media_volume_level() == 0.18
+    assert "ui_service/state" in (client.state.volume_topic or "")
+
+
+def test_volume_key_unmutes_local_icon(proto_client, monkeypatch) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    client.state.available = True
+    client.state.volume = 18
+    client.state.muted = True
+    client._control_warmup = False
+    client._last_remoter_ok_at = 10_000.0
+    client._last_volume_deliver_at = 0.0
+    monkeypatch.setattr(client, "_publish_action", lambda *a, **k: None)
+    monkeypatch.setattr(proto_client, "send_local_key", lambda host, key, **kwargs: 200)
+    assert client._send_volume_step("KEY_VOLUMEDOWN", pause=lambda _delay: None) is True
+    assert client.state.volume == 17
+    assert client.state.muted is False
+    assert client.state.media_is_volume_muted() is False
+
+
 def test_unknown_mute_is_not_shown_as_unmuted(proto_client) -> None:
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     client.state.available = True

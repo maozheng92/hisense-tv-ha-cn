@@ -382,6 +382,9 @@ def test_volume_step_lan_only_no_mqtt(
     assert keys == ["KEY_VOLUMEUP"]
     assert {action for _s, action, _p, _k in calls} == {"gettvstate", "getvolume"}
     assert not any(action in {"sendkey", "changevolume"} for _s, action, _p, _k in calls)
+    assert client.state.volume == 21
+    assert client.state.volume_topic == "assumed"
+    assert client.state.media_volume_level() == 0.21
 
 
 def test_volume_step_paces_between_presses(

@@ -6,7 +6,8 @@ media browser is always advertised so more-info keeps 「浏览媒体」.
 VOLUME_SET is advertised so HA exposes ``volume_level``. Control stays
 LAN KEY_VOLUME +/- (or optional HA buttons). Dragging the slider does
 not send MQTT ``changevolume``. 爱家 itself has no TV volume/mute
-telemetry; mute follows the remoter's local toggle.
+telemetry; mute follows the remoter's local toggle. After a successful
+volume key with no OSD yet, the slider starts at 20 and steps.
 """
 
 from __future__ import annotations

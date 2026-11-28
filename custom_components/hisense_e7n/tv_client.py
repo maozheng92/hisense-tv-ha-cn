@@ -36,6 +36,7 @@ from .const import (
     SOURCE_MENU_SETTLE,
     SOURCE_OPEN_RETRIES,
     SOURCE_OPEN_RETRY_DELAY,
+    VOLUME_ASSUMED_START,
     VOLUME_CEC_GAP,
     VOLUME_KEY_IDLE_WARMUP,
     VOLUME_KEY_PAUSE,
@@ -1173,10 +1174,18 @@ class HisenseTvClient:
             self._publish_action("ui_service", action, "")
 
     def _note_volume_delta(self, delta: int) -> None:
-        """Optimistic local level after a successful ±1 step."""
+        """Move HA's slider after a successful ±1 step.
+
+        爱家 never reports the TV level. If we still have no OSD value, start
+        from ``VOLUME_ASSUMED_START`` so the media_player is not stuck at
+        ``None``. A later ``volume_value`` overwrites this.
+        """
         if self.state.volume is None:
-            return
+            self.state.volume = VOLUME_ASSUMED_START
+            self.state.volume_topic = "assumed"
         self.state.volume = max(0, min(100, int(self.state.volume) + int(delta)))
+        if self.state.muted:
+            self.state.muted = False
         self._notify()
 
     def _note_mute_toggle(self) -> None:
