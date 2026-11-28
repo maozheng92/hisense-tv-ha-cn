@@ -233,14 +233,40 @@ E7N Pro 是 VIDAA 机。爱家添加家电会提示打开蓝牙（`flutter_blue_
 
 爱家云 `pushRemoter`、HiConnect 都不是 HA 的主路径：云要账号，HiConnect 是家电发现栈。红外只作为关机后的开机手段，接到 HA 的 remote 或 button 上。
 
-## 8. 想对接自己电视时该看哪一层
+## 8. 爱家「电视应用 → 我的应用」怎么拉列表
+
+空白的 HA 媒体浏览器「我的应用 / 没有项目」不是订晚了 MQTT。爱家 7.0.8.12 的 `libapp.so` **没有** `applist`、`remoteapp`、`launchapp` 这些 VIDAA 主题字符串。列表页在 Flutter `jhk_main_page/pages/tv_page.dart`（`tv_page_vm.dart`），数据是云端栏目，不是机内 `:36669`。
+
+流程：
+
+1. **拉栏目** `getTvColumnList` / `getTvColumnListDataNet` / `getTvColumnListByOnline`  
+   DTO：`home_page_tv_columns_dto.dart`、`home_page_tv_dto.dart`、`home_page_tv_tab_dto.dart`  
+   接口（均需爱家登录 + `jhk_signature`）：
+   - `https://mobile-home-launcher-verif.hismarttv.com/api/columns`
+   - `https://mobile-home-launcher-verif.hismarttv.com/api/mobileMainPage`
+   - `https://mobile-home-launcher-verif.hismarttv.com/api/sideBar`
+2. **按已装应用过滤格子** `filterTile`，字段名 **`mqttAppNameList`**（电视上报给爱家云的已装应用名，不是 VIDAA `data/applist`）
+3. **空位用推荐补** `generateDefaultDataByScene` / `getRecData`：
+   - `https://mobile-aiot.hismarttv.com/vodapptv/5.14/getRecData`
+   - `https://mobile-aiot.hismarttv.com/vodapptv/5.10/sceneParams/data/get`
+   - `https://mobile-aiot.hismarttv.com/vodapptv/5.10/customized/data/get`
+4. **图标** `JhkAppIconDto` / `changeAppIcon`（`MethodChannelJhkUiCommon`）
+5. **能力** `https://mobile-aiot.hismarttv.com/vodapptv/device/5.8/ability`；同网还会 `tryGetCapacitiesFromPort7778`（`GET /..hisharecapacity`，只有能力位，**没有应用列表**）
+
+**打开**才是本机。官方网页遥控同网控制走 `POST /..pushwechatvoice`（`voice` + `msgchannel:1` + `msgresource:4` + `msgtype:6`），和信号源/识图同一通道；点「我的应用」应发「打开{应用名}」。`POST /..pushsmartju` 是聚好看推片（toast「正在推送中」，`msgtype` 2，`jumpUrl` 里才是 `startupType` 4 的片源 JSON）。APK 里写死的 jump JSON 都带 `action` 和 `uri`（推片/商店），没有 `action` 时这台 E7N 回 HTTP 400；把已装包名塞进 `pushsmartju` 会提示「播放失败」。`/..commonstarttvapp` 是带签名的截屏启动口，不是通用启动器。MQTT `launchapp` 把包名放进 `url` 同样会被电视当成播片。
+
+因此：没有爱家账号 token，HA **不能**克隆「我的应用」列表。VIDAA MQTT `actions/applist` 是 RemoteNOW 路径，爱家不用，这台 E7N 也不回。
+
+1.25.0 起集成可在配置流/选项里用爱家**手机号 + 密码**登录（`POST /mobile/se/signon`，网页客户端 `commonweb` 的 `X-Sign-For`）。令牌写入 config entry，密码不保存；随后拉 `devices/list` 匹配这台电视，再请求 `api/columns` / `mqttAppNameList`。打开仍走 LAN `pushsmartju`。1.25.2 起选项里提交账号后立刻把令牌接到正在运行的 `HisenseTvHub`，不必先点选项菜单「保存」；浏览媒体的提示行不再作为 `MediaType.APP` 走 `play_media`。1.25.3 起在 `devices/list` 之外再请求 `devices/detail` 与 `state/getExtendState`，并把 IoT 的 name/value `states` / JSON 字符串展开成 `mqttAppNameList`。1.25.4 起用配置 MAC 或 `deviceId` 末 12 位补上空的 `wifiId`，且 IoT `payload.errorCode` 不再当成成功。1.25.5 起 `wifiId` 明确是电视网卡 ID 不是 Wi-Fi 名；`getExtendState` 补上 `comModuleId` / `payloadVersion`；栏目只用门户钥做 GET（IoT 钥会 Wrong Signature）。1.25.6 起选项页显示「爱家：未登录」或「爱家：账号（已登录）」；`login4TV` 把 `token` 放进查询参数/表单（上次 JSON 体里服务端读不到）；栏目带 `license`；并请求 IoT `state/value/custom/name/get`（APK 里紧挨 `mqttAppNameList`）。1.25.7：`login4TV` 补客户端 `sid`（token 过了之后报缺 sid）；栏目无 license 时用 `-1` 占位；`custom/name/get` 带 `devices` 数组。1.25.8：浏览媒体兜底改为爱家「我的应用」预装目录（海信爱家、微信电视、媒体中心、Hi投屏等），不再用热门精选里的云视听/聚好看。1.25.9：点击打开不再回退 MQTT `launchapp`。1.25.10：打开已装应用改为本机语音「打开{应用名}」（`/..pushwechatvoice`）；`pushsmartju` / `commonstarttvapp` 不再用于点应用（前者是推片，后者是截屏启动口，这台 E7N 都是 HTTP 400 + 播放失败）。
+
+## 9. 想对接自己电视时该看哪一层
 
 1. **已登录爱家账号、电视已绑定**：云通道即可。按键走 `/mobilemsg/push/v5.3/remoter`，开关机/场景走 `/4.0/iot/devices/execute`，MQTT 配置走 `/2.0/mqtt/config`。请求需要账号 token 和 `deviceId`。
 2. **手机和电视同一局域网**：先 DLNA/HiConnect 发现，拿到 `ip`+`wifiId`+`ticket`，再调 `HiConnect.control` / `specialControl`。报文 AES，不能只靠明文 HTTP。
 3. **只要传统遥控**：看红外 Activity，与 IP 协议无关。
 4. **投屏**：走 Ju AIoT mirror / LiteAV / WebRTC，不是遥控键值。
 
-## 9. 分析边界
+## 10. 分析边界
 
 - Java 业务被百度加固，无法得到 `HiConnect.java` 的完整封装代码。
 - Dart 是 AOT，只能还原符号和字符串，不能还原完整函数体。

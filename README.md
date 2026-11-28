@@ -13,7 +13,7 @@ E7N Pro 结论与安装：[docs/e7n-pro-homeassistant.md](docs/e7n-pro-homeassis
 
 目录：`custom_components/hisense_e7n`
 
-拷到 HA 的 `config/custom_components/` 后重启，在「添加集成」里搜 **Hisense E7N Pro**。选项页脚脚本在 `frontend/`，启动时自动安装到 `config/www/hisense_e7n/`（`/local/hisense_e7n/`）。集成目录里**没有** `www/`（避免 Windows 占用无法更新）。若旧版 `custom_components/hisense_e7n/www` 提示占用，先停止 Home Assistant 再删除该文件夹后更新。升级后请**硬刷新 HA 前端**（Ctrl+Shift+R）。配对时电视需已开机，填写 IP 即可，**不用蓝牙地址**。爱家遥控页上的键通过 `remote` 实体发送，**不会**建成 `button` 实体。连不上 36669 时，集成会自动用爱家客户端证书、降低 TLS 安全级别，并在必要时回退明文 MQTT。若电视屏幕出现 4 位数字，调用 `hisense_e7n.submit_code`。爱家无法唤醒关机的电视。每台电视在配置里单独选择开机方式：**按钮 / 开关 / 脚本**，或一只红外遥控（`remote.send_command`），或 Wi-Fi MAC 网络唤醒。播放器支持自定义输入源、媒体浏览器里的已安装应用，以及上一台 / 下一台。音量只有 +/-，没有滑块。VIDAA MQTT `volumechange` 会报静音，接到 `is_volume_muted`。
+拷到 HA 的 `config/custom_components/` 后重启，在「添加集成」里搜 **Hisense E7N Pro**。选项页脚脚本在 `frontend/`，启动时自动安装到 `config/www/hisense_e7n/`（`/local/hisense_e7n/`）。集成目录里**没有** `www/`（避免 Windows 占用无法更新）。若旧版 `custom_components/hisense_e7n/www` 提示占用，先停止 Home Assistant 再删除该文件夹后更新。升级后请**硬刷新 HA 前端**（Ctrl+Shift+R）。配对时电视需已开机，填写 IP 即可，**不用蓝牙地址**。爱家遥控页上的键通过 `remote` 实体发送，**不会**建成 `button` 实体。连不上 36669 时，集成会自动用爱家客户端证书、降低 TLS 安全级别，并在必要时回退明文 MQTT。若电视屏幕出现 4 位数字，调用 `hisense_e7n.submit_code`。爱家无法唤醒关机的电视。每台电视在配置里单独选择开机方式：**按钮 / 开关 / 脚本**，或一只红外遥控（`remote.send_command`），或 Wi-Fi MAC 网络唤醒。播放器支持自定义输入源。**打开应用**走爱家本机语音「打开{应用名}」（`/..pushwechatvoice`，与信号源/识图相同；Android 包名不走 MQTT `launchapp` 或推片口 `/..pushsmartju`，以免电视提示播放失败）；「我的应用」列表在配置流/选项登录爱家账号后从云栏目拉取，本机 MQTT 没有这份列表。更多信息里的「浏览媒体」始终显示；没登录或列表为空时目录里是提示，不是「没有项目」。以及上一台 / 下一台。音量只有 +/-，没有滑块。VIDAA MQTT `volumechange` 会报静音，接到 `is_volume_muted`。
 
 ```text
 custom_components/hisense_e7n/   # 本仓库

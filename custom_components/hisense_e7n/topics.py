@@ -1,7 +1,9 @@
 """VIDAA ``/remoteapp/`` topic helpers.
 
-Wildcards are unreliable on some firmware, so the client subscribes
-to the concrete topics listed here.
+This TV grants ``/remoteapp/#`` (needed for applist replies that land on
+an unexpected identity). Subscribe the wildcard first, then concrete
+topics. Requesting ``applist`` in the same tick as SUBSCRIBE often loses
+the reply — the client delays that publish.
 """
 
 from __future__ import annotations
@@ -100,9 +102,14 @@ _MOBILE_DATA = (
     ("platform_service", "tokenissuance"),
 )
 
+_WILDCARDS = (
+    "/remoteapp/#",
+)
+
 _BROADCASTS = (
     "/remoteapp/mobile/broadcast/ui_service/state",
     "/remoteapp/mobile/broadcast/ui_service/data/applist",
+    "/remoteapp/mobile/broadcast/ui_service/data/appList",
     "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep",
     "/remoteapp/mobile/broadcast/platform_service/data/volumechange",
     "/remoteapp/mobile/broadcast/platform_service/actions/volumechange",
@@ -113,13 +120,20 @@ _BROADCASTS = (
 def subscription_topics(creds: MqttCredentials, tv_mac: str | None = None) -> list[str]:
     topics: list[str] = []
     seen: set[str] = set()
+
+    def _add(topic: str) -> None:
+        if topic and topic not in seen:
+            seen.add(topic)
+            topics.append(topic)
+
+    for topic in _WILDCARDS:
+        _add(topic)
+    for topic in _BROADCASTS:
+        _add(topic)
     for ident in command_identities(creds, tv_mac):
         for service, data_type in _MOBILE_DATA:
-            topic = f"/remoteapp/mobile/{ident}/{service}/data/{data_type}"
-            if topic not in seen:
-                seen.add(topic)
-                topics.append(topic)
-    for topic in _BROADCASTS:
-        if topic not in seen:
-            topics.append(topic)
+            _add(f"/remoteapp/mobile/{ident}/{service}/data/{data_type}")
+            if data_type == "applist":
+                _add(f"/remoteapp/mobile/{ident}/{service}/applist")
+                _add(f"/remoteapp/mobile/{ident}/{service}/data/appList")
     return topics

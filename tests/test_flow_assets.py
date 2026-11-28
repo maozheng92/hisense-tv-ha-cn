@@ -18,8 +18,9 @@ _FORM_STEPS = (
     "source_seq_repeat",
     "source_delete",
     "source_reorder",
+    "account",
 )
-_INIT_MENU = ("connection", "power_on", "volume", "sources", "save")
+_INIT_MENU = ("connection", "power_on", "volume", "sources", "account", "save")
 _SOURCE_MENU = (
     "source_add",
     "source_edit",
@@ -54,10 +55,15 @@ def test_zh_uses_button_entity_name() -> None:
     hidden = zh["options"]["step"]["source_add"]["data"]["hidden"]
     assert hidden == "从输入源列表中隐藏"
     assert zh["options"]["step"]["init"]["menu_options"]["volume"] == "音量按钮"
+    assert zh["options"]["step"]["init"]["menu_options"]["account"] == "爱家账号"
+    assert zh["options"]["step"]["init"]["description"].startswith("爱家：{aijia}")
+    assert "爱家：{aijia}" in zh["options"]["step"]["account"]["description"]
+    assert zh["config"]["step"]["account"]["data"]["aijia_password"] == "密码"
     assert zh["config"]["step"]["volume"]["data"]["音量加按钮"] == "音量加按钮"
     assert "entity" in zh
     assert "button" not in zh["entity"]
     assert "remote" not in zh["entity"]
+    assert "select" not in zh["entity"]
     assert "go_back_choice" not in zh.get("selector", {})
 
 
@@ -81,6 +87,7 @@ def test_strings_and_en_match_tcl_source_ux() -> None:
         assert "button" not in data.get("entity", {})
         assert "remote" not in data.get("entity", {})
         assert "go_back_choice" not in data.get("selector", {})
+        assert step["init"]["description"].startswith("爱家: {aijia}")
 
 
 def test_footer_script_posts_go_back_and_hides_menu_rows() -> None:
@@ -136,10 +143,33 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_23_8() -> None:
+def test_version_is_1_25_10() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.23.8"
+    assert manifest["version"] == "1.25.10"
     assert not (_ROOT / "www").exists()
+    assert not (_ROOT / "select.py").exists()
+
+
+def test_browse_media_is_always_advertised() -> None:
+    text = (_ROOT / "media_player.py").read_text(encoding="utf-8")
+    base = text.split("_BASE_SUPPORT = (", 1)[1].split(")", 1)[0]
+    assert "MediaPlayerEntityFeature.BROWSE_MEDIA" in base
+    features = text.split("def supported_features", 1)[1].split("def state", 1)[0]
+    assert "hub.tv.apps" not in features
+    placeholder = text.split("def _apps_placeholder", 1)[1].split("def _app_item", 1)[0]
+    assert "MediaClass.DIRECTORY" in placeholder
+    assert "MediaType.APPS" in placeholder
+    assert "can_play=True" not in placeholder
+    assert "apps-refresh" in placeholder
+    flow = (_ROOT / "config_flow.py").read_text(encoding="utf-8")
+    assert "async def _async_commit_aijia_session" in flow
+    assert "aijia_status_text" in flow
+    assert "default_launch_apps" in text
+    play = text.split("async def async_play_media", 1)[1].split(
+        "async def async_browse_media", 1
+    )[0]
+    assert "_apps_empty_message" in play
+    assert 'media_id == "aijia-login"' not in play
 
 
 def test_sources_menu_save_is_footer_not_row() -> None:

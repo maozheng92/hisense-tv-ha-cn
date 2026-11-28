@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
+
+_LOGGER = logging.getLogger(__name__)
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_MAC, CONF_NAME, CONF_PORT
@@ -37,9 +40,29 @@ except ImportError:  # pragma: no cover - HA < 2024.11
     OptionsFlowWithReload = config_entries.OptionsFlow  # type: ignore[misc,assignment]
     OPTIONS_FLOW_RELOADS = False
 
+from .aijia_account import (
+    AijiaAuthError,
+    AijiaError,
+    AijiaTokens,
+    async_fetch_apps,
+    async_login,
+    empty_entry_fields,
+    status_text as aijia_status_text,
+    tokens_from_entry,
+)
 from .certs_util import resolve_cert_candidates
 from .const import (
     AUTH_MODES,
+    CONF_AIJIA_ACCESS_TOKEN,
+    CONF_AIJIA_CUSTOMER_ID,
+    CONF_AIJIA_DEVICE_ID,
+    CONF_AIJIA_WIFI_ID,
+    CONF_AIJIA_PASSWORD,
+    CONF_AIJIA_REFRESH_TOKEN,
+    CONF_AIJIA_TOKEN_OBTAINED_AT,
+    CONF_AIJIA_TOKEN_TTL,
+    CONF_AIJIA_TV_LOGIN_ID,
+    CONF_AIJIA_USERNAME,
     CONF_AUTH_MODE,
     CONF_CLIENT_CERT,
     CONF_CLIENT_KEY,
@@ -201,6 +224,54 @@ def _volume_add_schema() -> vol.Schema:
     )
 
 
+def _account_schema(*, username: str = "") -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Optional(CONF_AIJIA_USERNAME, default=username): TextSelector(
+                TextSelectorConfig(type="text")
+            ),
+            vol.Optional(CONF_AIJIA_PASSWORD): TextSelector(
+                TextSelectorConfig(type="password")
+            ),
+        }
+    )
+
+
+def _aijia_fields(tokens: AijiaTokens | None) -> dict[str, Any]:
+    if tokens is None or not tokens.logged_in:
+        return empty_entry_fields()
+    return tokens.to_entry()
+
+
+async def _async_bind_aijia(
+    hass,
+    *,
+    username: str,
+    password: str,
+    host: str,
+    mac: str,
+    existing: AijiaTokens | None = None,
+) -> AijiaTokens:
+    """Login (or reuse tokens) and resolve the TV's 爱家 deviceId."""
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+    session = async_get_clientsession(hass)
+    user = (username or "").strip()
+    if user and password:
+        tokens = await async_login(session, user, password)
+    elif existing and existing.logged_in:
+        tokens = existing
+        if user:
+            tokens.username = user
+    else:
+        raise AijiaAuthError("请填写爱家手机号和密码")
+    try:
+        tokens, _apps = await async_fetch_apps(session, tokens, host=host, mac=mac or None)
+    except AijiaError as err:
+        _LOGGER.warning("爱家已登录，但拉取我的应用失败: %s", err)
+    return tokens
+
+
 class HisenseE7NConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Hisense E7N Pro."""
 
@@ -319,13 +390,44 @@ class HisenseE7NConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 cleaned = clean_power_on_fields(merged)
                 self._pending[CONF_VOLUME_UP_BUTTON] = cleaned.get(CONF_VOLUME_UP_BUTTON) or ""
                 self._pending[CONF_VOLUME_DOWN_BUTTON] = cleaned.get(CONF_VOLUME_DOWN_BUTTON) or ""
+                return await self.async_step_account()
+        return self.async_show_form(
+            step_id="volume",
+            data_schema=_volume_add_schema(),
+            errors=errors,
+        )
+
+    async def async_step_account(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            username = str(user_input.get(CONF_AIJIA_USERNAME) or "").strip()
+            password = str(user_input.get(CONF_AIJIA_PASSWORD) or "")
+            if username or password:
+                try:
+                    tokens = await _async_bind_aijia(
+                        self.hass,
+                        username=username,
+                        password=password,
+                        host=str(self._pending.get(CONF_HOST) or ""),
+                        mac=str(self._pending.get(CONF_MAC) or ""),
+                    )
+                except AijiaAuthError:
+                    errors["base"] = "invalid_auth"
+                except (AijiaError, OSError, TimeoutError):
+                    errors["base"] = "aijia_connect"
+                else:
+                    self._pending.update(_aijia_fields(tokens))
+                    self._pending[CONF_AIJIA_USERNAME] = tokens.username or username
+            if not errors:
                 return self.async_create_entry(
                     title=self._pending.get(CONF_NAME) or DEFAULT_NAME,
                     data=self._pending,
                 )
         return self.async_show_form(
-            step_id="volume",
-            data_schema=_volume_add_schema(),
+            step_id="account",
+            data_schema=_account_schema(),
             errors=errors,
         )
 
@@ -344,7 +446,7 @@ class HisenseE7NConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class HisenseE7NOptionsFlow(OptionsFlowWithReload):
-    """Draft menu: connection, power-on, volume, sources; one Save reloads."""
+    """Draft menu: connection, power-on, volume, sources, 爱家; one Save reloads."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry | None = None) -> None:
         if config_entry is not None:
@@ -404,6 +506,15 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
             or "",
             CONF_SOURCE_KEY_DELAY: self._clamp_delay(merged.get(CONF_SOURCE_KEY_DELAY)),
             CONF_CUSTOM_SOURCES: copy_sources(merged.get(CONF_CUSTOM_SOURCES)),
+            CONF_AIJIA_USERNAME: str(merged.get(CONF_AIJIA_USERNAME) or "").strip(),
+            CONF_AIJIA_ACCESS_TOKEN: str(merged.get(CONF_AIJIA_ACCESS_TOKEN) or "").strip(),
+            CONF_AIJIA_REFRESH_TOKEN: str(merged.get(CONF_AIJIA_REFRESH_TOKEN) or "").strip(),
+            CONF_AIJIA_CUSTOMER_ID: str(merged.get(CONF_AIJIA_CUSTOMER_ID) or "").strip(),
+            CONF_AIJIA_DEVICE_ID: str(merged.get(CONF_AIJIA_DEVICE_ID) or "").strip(),
+            CONF_AIJIA_WIFI_ID: str(merged.get(CONF_AIJIA_WIFI_ID) or "").strip(),
+            CONF_AIJIA_TV_LOGIN_ID: str(merged.get(CONF_AIJIA_TV_LOGIN_ID) or "").strip(),
+            CONF_AIJIA_TOKEN_OBTAINED_AT: merged.get(CONF_AIJIA_TOKEN_OBTAINED_AT) or 0,
+            CONF_AIJIA_TOKEN_TTL: merged.get(CONF_AIJIA_TOKEN_TTL) or 0,
         }
         self._draft_ready = True
 
@@ -459,6 +570,10 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
             "volume_up": str(volume_up),
             "volume_down": str(volume_down),
             "host": str(self._data.get(CONF_HOST) or "—"),
+            "aijia": aijia_status_text(
+                tokens_from_entry(self._data),
+                str(self._data.get(CONF_AIJIA_USERNAME) or ""),
+            ),
         }
 
     def _saved_options(self) -> dict[str, Any]:
@@ -620,7 +735,7 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
         self._reset_source_seq()
         return self.async_show_menu(
             step_id="init",
-            menu_options=["connection", "power_on", "volume", "sources", "save"],
+            menu_options=["connection", "power_on", "volume", "sources", "account", "save"],
             description_placeholders=self._menu_placeholders(),
         )
 
@@ -636,10 +751,39 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
         if errors:
             return self.async_show_menu(
                 step_id="init",
-                menu_options=["connection", "power_on", "volume", "sources", "save"],
+                menu_options=["connection", "power_on", "volume", "sources", "account", "save"],
                 description_placeholders=self._menu_placeholders(),
             )
+        self._persist_aijia_entry_data()
         return self.async_create_entry(title="", data=payload)
+
+    def _persist_aijia_entry_data(self) -> None:
+        entry = self._entry()
+        tokens = tokens_from_entry(self._data)
+        payload = _aijia_fields(tokens)
+        username = str(
+            self._data.get(CONF_AIJIA_USERNAME)
+            or (tokens.username if tokens else "")
+            or ""
+        ).strip()
+        payload[CONF_AIJIA_USERNAME] = username
+        self.hass.config_entries.async_update_entry(entry, data={**entry.data, **payload})
+
+    async def _async_commit_aijia_session(self) -> None:
+        """Write tokens now so 浏览媒体 works before the options Save."""
+        self._persist_aijia_entry_data()
+        entry = self._entry()
+        try:
+            from .hub import hub_from_entry
+
+            hub = hub_from_entry(self.hass, entry)
+        except (AttributeError, KeyError):
+            return
+        hub.configure_aijia({**entry.data, **self._data})
+        try:
+            await hub.async_refresh_aijia_apps()
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("登录后刷新爱家「我的应用」失败", exc_info=True)
 
     async def async_step_connection(
         self, user_input: dict[str, Any] | None = None
@@ -804,6 +948,55 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
         return self._show_form(
             "volume",
             self.add_suggested_values_to_schema(schema, suggested),
+            errors=errors,
+        )
+
+    async def async_step_account(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        self._ensure_draft()
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if self._wants_back(user_input):
+                return await self.async_step_init()
+            if CONF_AIJIA_USERNAME in user_input:
+                username = str(user_input.get(CONF_AIJIA_USERNAME) or "").strip()
+            else:
+                username = str(self._data.get(CONF_AIJIA_USERNAME) or "").strip()
+            password = str(user_input.get(CONF_AIJIA_PASSWORD) or "")
+            if not username:
+                self._data.update(empty_entry_fields())
+                self._data[CONF_AIJIA_USERNAME] = ""
+                await self._async_commit_aijia_session()
+                return await self.async_step_init()
+            existing = tokens_from_entry(self._data)
+            if not password and existing and existing.logged_in:
+                existing.username = username
+                self._data.update(_aijia_fields(existing))
+                self._data[CONF_AIJIA_USERNAME] = username
+                await self._async_commit_aijia_session()
+                return await self.async_step_init()
+            try:
+                tokens = await _async_bind_aijia(
+                    self.hass,
+                    username=username,
+                    password=password,
+                    host=str(self._data.get(CONF_HOST) or ""),
+                    mac=str(self._data.get(CONF_MAC) or ""),
+                    existing=existing,
+                )
+            except AijiaAuthError:
+                errors["base"] = "invalid_auth"
+            except (AijiaError, OSError, TimeoutError):
+                errors["base"] = "aijia_connect"
+            else:
+                self._data.update(_aijia_fields(tokens))
+                self._data[CONF_AIJIA_USERNAME] = tokens.username or username
+                await self._async_commit_aijia_session()
+                return await self.async_step_init()
+        return self._show_form(
+            "account",
+            _account_schema(username=str(self._data.get(CONF_AIJIA_USERNAME) or "")),
             errors=errors,
         )
 
