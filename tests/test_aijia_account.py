@@ -260,6 +260,82 @@ def test_fetch_apps_uses_columns_when_iot_forbidden() -> None:
     asyncio.run(_run())
 
 
+def test_extract_cloud_apps_from_named_state_list() -> None:
+    account = _account()
+    apps = account.extract_cloud_apps(
+        {
+            "deviceId": "tv-1",
+            "states": [
+                {"name": "onlineStatus", "value": "1"},
+                {
+                    "name": "mqttAppNameList",
+                    "value": json.dumps(
+                        [
+                            {
+                                "name": "健身镜",
+                                "packageName": "com.hisense.fitness",
+                                "isLocalApp": 1,
+                            }
+                        ],
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        }
+    )
+    assert [item["name"] for item in apps] == ["健身镜"]
+    assert apps[0]["package"] == "com.hisense.fitness"
+
+
+def test_fetch_apps_from_extend_state() -> None:
+    account = _account()
+    session = FakeSession(
+        {
+            "/4.0/iot/home/list": {
+                "payload": {"status": "SUCCESS", "homes": [{"id": "home-1"}]}
+            },
+            "/4.0/iot/devices/list": {
+                "payload": {
+                    "status": "SUCCESS",
+                    "devices": [
+                        {
+                            "deviceId": "tv-1",
+                            "wifiId": "aabbccddeeff",
+                            "categoryCode": "connector.device.type.tv",
+                            "nickname": "客厅电视",
+                            "states": [{"name": "onlineStatus", "value": "1"}],
+                        }
+                    ],
+                }
+            },
+            "/4.0/iot/state/getExtendState": {
+                "payload": {
+                    "status": "SUCCESS",
+                    "mqttAppNameList": [
+                        {
+                            "name": "健身镜",
+                            "packageName": "com.hisense.fitness",
+                            "isLocalApp": 1,
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    async def _run():
+        tokens = account.AijiaTokens(access_token="tok", customer_id="c1")
+        updated, apps = await account.async_fetch_apps(
+            session, tokens, host="192.168.1.8", mac="aa:bb:cc:dd:ee:ff"
+        )
+        assert updated.device_id == "tv-1"
+        assert updated.wifi_id == "aabbccddeeff"
+        assert [item["name"] for item in apps] == ["健身镜"]
+        assert any("getExtendState" in url for _method, url in session.calls)
+
+    asyncio.run(_run())
+
+
 def test_parse_login_rejects_bad_password() -> None:
     account = _account()
     try:
