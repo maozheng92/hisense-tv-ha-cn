@@ -47,6 +47,7 @@ from .aijia_account import (
     async_fetch_apps,
     async_login,
     empty_entry_fields,
+    status_text as aijia_status_text,
     tokens_from_entry,
 )
 from .certs_util import resolve_cert_candidates
@@ -569,7 +570,10 @@ class HisenseE7NOptionsFlow(OptionsFlowWithReload):
             "volume_up": str(volume_up),
             "volume_down": str(volume_down),
             "host": str(self._data.get(CONF_HOST) or "—"),
-            "aijia": str(self._data.get(CONF_AIJIA_USERNAME) or "—"),
+            "aijia": aijia_status_text(
+                tokens_from_entry(self._data),
+                str(self._data.get(CONF_AIJIA_USERNAME) or ""),
+            ),
         }
 
     def _saved_options(self) -> dict[str, Any]:

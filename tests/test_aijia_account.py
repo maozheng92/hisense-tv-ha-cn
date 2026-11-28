@@ -35,6 +35,10 @@ class FakeSession:
         self.bodies: list[object] = []
 
     def request(self, method: str, url: str, **kwargs):
+        params = kwargs.get("params")
+        if params:
+            query = "&".join(f"{key}={params[key]}" for key in params)
+            url = f"{url}?{query}" if "?" not in url else f"{url}&{query}"
         self.calls.append((method.upper(), url))
         self.bodies.append(kwargs.get("data"))
         for suffix, body in self.routes.items():
@@ -95,6 +99,9 @@ def test_parse_login_reads_token_info() -> None:
     assert "password" not in blob
     assert blob["aijia_access_token"] == "access-1"
     assert account.tokens_from_entry(blob).logged_in
+    tokens.username = "13800138000"
+    assert account.status_text(tokens) == "13800138000（已登录）"
+    assert account.status_text(None) == "未登录"
 
 
 def test_pick_tv_prefers_wifi_mac_and_tv_product() -> None:
@@ -507,6 +514,113 @@ def test_extend_state_sends_com_module_id() -> None:
         )
 
     asyncio.run(_run())
+
+
+def test_login4tv_sends_token_field() -> None:
+    account = _account()
+    session = FakeSession(
+        {
+            "/4.0/iot/home/list": {
+                "payload": {"status": "SUCCESS", "homes": [{"id": "home-1"}]}
+            },
+            "/4.0/iot/devices/list": {
+                "payload": {
+                    "status": "SUCCESS",
+                    "devices": [
+                        {
+                            "deviceId": "tv-1",
+                            "comModuleId": "com-mod-1",
+                            "categoryCode": "connector.device.type.TV",
+                            "nickname": "客厅电视",
+                            "states": [{"name": "onlineStatus", "value": "1"}],
+                        }
+                    ],
+                }
+            },
+            "login4TVByPhoneToken": {
+                "data": {"tvLoginedId": "tv-license-12345678"}
+            },
+            "/api/columns": {
+                "mqttAppNameList": [
+                    {
+                        "name": "云视听极光",
+                        "packageName": "com.ktcp.video",
+                        "isLocalApp": 1,
+                    }
+                ]
+            },
+        }
+    )
+
+    async def _run():
+        tokens = account.AijiaTokens(access_token="tok", customer_id="c1")
+        updated, apps = await account.async_fetch_apps(session, tokens)
+        assert updated.tv_login_id == "tv-license-12345678"
+        assert [item["name"] for item in apps] == ["云视听极光"]
+        assert any(
+            isinstance(body, str) and '"token":"tok"' in body for body in session.bodies
+        )
+        assert any("token=tok" in url for _method, url in session.calls)
+
+    asyncio.run(_run())
+
+
+def test_fetch_apps_from_custom_state_name() -> None:
+    account = _account()
+    session = FakeSession(
+        {
+            "/4.0/iot/home/list": {
+                "payload": {"status": "SUCCESS", "homes": [{"id": "home-1"}]}
+            },
+            "/4.0/iot/devices/list": {
+                "payload": {
+                    "status": "SUCCESS",
+                    "devices": [
+                        {
+                            "deviceId": "tv-1",
+                            "comModuleId": "com-mod-1",
+                            "categoryCode": "connector.device.type.TV",
+                            "nickname": "客厅电视",
+                            "states": [{"name": "onlineStatus", "value": "1"}],
+                        }
+                    ],
+                }
+            },
+            "/4.0/iot/state/value/custom/name/get": {
+                "payload": {
+                    "status": "SUCCESS",
+                    "mqttAppNameList": [
+                        {
+                            "name": "云视听极光",
+                            "packageName": "com.ktcp.video",
+                            "isLocalApp": 1,
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    async def _run():
+        tokens = account.AijiaTokens(access_token="tok", customer_id="c1")
+        updated, apps = await account.async_fetch_apps(session, tokens)
+        assert [item["name"] for item in apps] == ["云视听极光"]
+        assert any("custom/name/get" in url for _method, url in session.calls)
+        assert updated.device_id == "tv-1"
+
+    asyncio.run(_run())
+
+
+def test_activation_string_becomes_ticket() -> None:
+    account = _account()
+    tokens = account.AijiaTokens(access_token="tok", customer_id="c1")
+    updated = account._tokens_from_activation(tokens, "ticket-from-activation-data")
+    assert updated.ticket == "ticket-from-activation-data"
+    assert updated.tv_login_id == "ticket-from-activation-data"
+    nested = account._tokens_from_activation(
+        tokens, {"license": "tv-license-from-cloud"}
+    )
+    assert nested.tv_login_id == "tv-license-from-cloud"
 
 
 def test_login_id_from_nested_data() -> None:

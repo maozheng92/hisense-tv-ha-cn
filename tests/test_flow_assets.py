@@ -56,6 +56,8 @@ def test_zh_uses_button_entity_name() -> None:
     assert hidden == "从输入源列表中隐藏"
     assert zh["options"]["step"]["init"]["menu_options"]["volume"] == "音量按钮"
     assert zh["options"]["step"]["init"]["menu_options"]["account"] == "爱家账号"
+    assert zh["options"]["step"]["init"]["description"].startswith("爱家：{aijia}")
+    assert "爱家：{aijia}" in zh["options"]["step"]["account"]["description"]
     assert zh["config"]["step"]["account"]["data"]["aijia_password"] == "密码"
     assert zh["config"]["step"]["volume"]["data"]["音量加按钮"] == "音量加按钮"
     assert "entity" in zh
@@ -85,6 +87,7 @@ def test_strings_and_en_match_tcl_source_ux() -> None:
         assert "button" not in data.get("entity", {})
         assert "remote" not in data.get("entity", {})
         assert "go_back_choice" not in data.get("selector", {})
+        assert step["init"]["description"].startswith("爱家: {aijia}")
 
 
 def test_footer_script_posts_go_back_and_hides_menu_rows() -> None:
@@ -140,9 +143,9 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_25_5() -> None:
+def test_version_is_1_25_6() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.25.5"
+    assert manifest["version"] == "1.25.6"
     assert not (_ROOT / "www").exists()
     assert not (_ROOT / "select.py").exists()
 
@@ -160,6 +163,7 @@ def test_browse_media_is_always_advertised() -> None:
     assert "apps-refresh" in placeholder
     flow = (_ROOT / "config_flow.py").read_text(encoding="utf-8")
     assert "async def _async_commit_aijia_session" in flow
+    assert "aijia_status_text" in flow
     play = text.split("async def async_play_media", 1)[1].split(
         "async def async_browse_media", 1
     )[0]

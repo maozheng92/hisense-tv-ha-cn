@@ -16,7 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass, replace
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -44,6 +44,7 @@ ACTIVITY_RESOURCES_URL = "https://layout-launcher.hismarttv.com/api/activityReso
 HOMEPAGE_LAYOUT = "/4.0/iot/layout/smartHomeApp/common"
 DEVICE_DETAIL = "/4.0/iot/devices/detail"
 EXTEND_STATE = "/4.0/iot/state/getExtendState"
+CUSTOM_STATE = "/4.0/iot/state/value/custom/name/get"
 HOMEPAGE_CONFIG = "/4.0/iot/devices/function/getHomepageConfig"
 FIND_BY_WIFI = "/4.0/iot/devices/findByWifiId"
 FIND_BY_SERIAL = "/4.0/iot/devices/findBySerialNumber"
@@ -105,6 +106,14 @@ class AijiaTokens:
             "aijia_token_obtained_at": self.obtained_at,
             "aijia_token_ttl": self.token_ttl,
         }
+
+
+def status_text(tokens: AijiaTokens | None, username: str = "") -> str:
+    """Options/entity label: 未登录 or 账号（已登录）."""
+    if tokens is None or not tokens.logged_in:
+        return "未登录"
+    who = (username or tokens.username or "").strip()
+    return f"{who}（已登录）" if who else "已登录"
 
 
 def tokens_from_entry(data: dict[str, Any] | None) -> AijiaTokens | None:
@@ -533,7 +542,7 @@ def _tokens_for_device(
     )
     return replace(
         tokens,
-        device_id=str(item.get("deviceId") or tokens.device_id),
+        device_id=str(item.get("deviceId") or item.get("id") or tokens.device_id),
         wifi_id=wifi,
         com_module_id=str(item.get("comModuleId") or tokens.com_module_id),
         home_id=str(item.get("homeId") or tokens.home_id),
@@ -548,7 +557,7 @@ def _partner_id(item: dict[str, Any]) -> str:
 
 
 def _ticket_from_device(item: dict[str, Any]) -> str:
-    for key in ("ticket", "hiTicket", "deviceTicket"):
+    for key in ("ticket", "hiTicket", "deviceTicket", "license", "tvLoginedId"):
         value = str(item.get(key) or "").strip()
         if value:
             return value
@@ -559,6 +568,49 @@ def _ticket_from_device(item: dict[str, Any]) -> str:
             if found:
                 return found
     return ""
+
+
+def _tokens_from_activation(tokens: AijiaTokens, blob: Any) -> AijiaTokens:
+    if isinstance(blob, str) and len(blob.strip()) >= 8:
+        value = blob.strip()
+        return replace(
+            tokens,
+            ticket=tokens.ticket or value,
+            tv_login_id=tokens.tv_login_id or value,
+        )
+    rows: list[dict[str, Any]] = []
+    if isinstance(blob, dict):
+        rows = [blob]
+    elif isinstance(blob, list):
+        rows = [item for item in blob if isinstance(item, dict)]
+    for row in rows:
+        ticket = _ticket_from_device(row) or tokens.ticket
+        login_id = (
+            _login_id_from_blob(row)
+            or str(row.get("license") or "")
+            or tokens.tv_login_id
+        )
+        tokens = replace(tokens, ticket=ticket, tv_login_id=login_id)
+    return tokens
+
+
+def _label_trace(item: dict[str, Any] | None) -> str:
+    if not isinstance(item, dict):
+        return "empty"
+    labels = item.get("labels")
+    if isinstance(labels, dict):
+        return ",".join(str(key) for key in list(labels)[:16]) or "empty"
+    if not isinstance(labels, list):
+        return type(labels).__name__ if labels is not None else "none"
+    bits: list[str] = []
+    for row in labels[:16]:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("key") or row.get("labelKey") or row.get("name") or "")
+        value = str(row.get("value") or row.get("labelValue") or "")[:24]
+        if key:
+            bits.append(f"{key}={value}" if value else key)
+    return ",".join(bits) or f"count={len(labels)}"
 
 
 def _iot_device(body: Any) -> dict[str, Any] | None:
@@ -668,6 +720,17 @@ async def _enrich_device(
                 {**base, "deviceIds": [tokens.device_id], "snList": [serial] if serial else []},
             )
         )
+        lookups.append(
+            (
+                CUSTOM_STATE,
+                {
+                    **base,
+                    "name": "mqttAppNameList",
+                    "names": ["mqttAppNameList"],
+                    "stateName": "mqttAppNameList",
+                },
+            )
+        )
     found_apps: list[dict[str, Any]] = []
     for path, extra in lookups:
         extra = {key: value for key, value in extra.items() if value not in ("", None, [])}
@@ -682,6 +745,13 @@ async def _enrich_device(
             traces.append(f"{path}.device:{_device_summary(nested)}")
             _merge_device(item, nested)
             tokens = _tokens_for_device(tokens, item, mac=mac)
+        if path == TV_ACTIVATION and isinstance(body, dict):
+            payload = body.get("payload") if isinstance(body.get("payload"), dict) else {}
+            blob = payload.get("data") if isinstance(payload, dict) else None
+            traces.append(f"activation.data:{_summarize_json(blob)}")
+            tokens = _tokens_from_activation(tokens, blob)
+        if path == BATCH_LABELS:
+            traces.append(f"labels:{_label_trace(item if nested is None else nested)}")
         apps = extract_cloud_apps(body)
         if apps:
             found_apps = apps
@@ -705,6 +775,7 @@ async def _try_tv_login_id(
 ) -> AijiaTokens:
     traces = traces if traces is not None else []
     payload = {
+        "token": tokens.access_token,
         "accessToken": tokens.access_token,
         "customerId": tokens.customer_id,
         "deviceId": tokens.device_id,
@@ -713,21 +784,50 @@ async def _try_tv_login_id(
         "serverCode": SERVER_CODE,
         "distributeId": DISTRIBUTE_ID,
     }
-    body = compact_json({key: value for key, value in payload.items() if value})
-    result: Any = None
-    for secret in (APP_SECRET, IOT_SIGN_SECRET):
+    payload = {key: value for key, value in payload.items() if value}
+    body = compact_json(payload)
+    form = urlencode(payload)
+    query = {
+        "token": tokens.access_token,
+        "accessToken": tokens.access_token,
+    }
+    attempts: list[tuple[str, str, dict[str, str], str | None, dict[str, str]]] = [
+        ("POST", body, signed_headers(body, tokens.access_token), body, query),
+        (
+            "POST",
+            form,
+            {
+                **signed_headers(form, tokens.access_token),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            form,
+            query,
+        ),
+        (
+            "GET",
+            "",
+            signed_headers(
+                "&".join(f"{key}={query[key]}" for key in sorted(query)),
+                tokens.access_token,
+            ),
+            None,
+            query,
+        ),
+    ]
+    for method, _signed, headers, data, params in attempts:
         try:
             status, result = await _request_json(
                 session,
-                "POST",
+                method,
                 TV_TOKEN_URL,
-                headers=signed_headers(body, tokens.access_token, secret=secret),
-                data=body,
+                headers=headers,
+                data=data,
+                params=params,
             )
         except AijiaError as err:
-            traces.append(f"login4TV:{err}")
+            traces.append(f"login4TV {method}:{err}")
             continue
-        traces.append(f"login4TV {status} {_summarize_json(result)}")
+        traces.append(f"login4TV {method} {status} {_summarize_json(result)}")
         if not isinstance(result, dict) or status >= 400:
             continue
         login_id = _login_id_from_blob(result)
@@ -761,6 +861,7 @@ async def _column_candidates(
             "customerId": tokens.customer_id,
             "accessToken": tokens.access_token,
             "tvLoginedId": tokens.tv_login_id,
+            "license": tokens.tv_login_id,
             "partnerId": tokens.partner_id,
             "homeId": tokens.home_id,
             "serverCode": SERVER_CODE,
@@ -835,6 +936,7 @@ def _identity_headers(tokens: AijiaTokens) -> dict[str, str]:
         "comModuleId": tokens.com_module_id,
         "tvLoginedId": tokens.tv_login_id,
         "tvToken": tokens.tv_login_id,
+        "license": tokens.tv_login_id,
         "distributeId": DISTRIBUTE_ID,
         "serverCode": SERVER_CODE,
         "versionName": APP_VERSION,
@@ -862,6 +964,7 @@ def _column_payload(tokens: AijiaTokens) -> dict[str, Any]:
         "partnerId": tokens.partner_id,
         "homeId": tokens.home_id,
         "tvLoginedId": tokens.tv_login_id,
+        "license": tokens.tv_login_id,
     }
     return {key: value for key, value in payload.items() if value not in ("", None)}
 
@@ -1132,6 +1235,7 @@ def _device_summary(item: dict[str, Any]) -> dict[str, Any]:
         "additionalKeys": list(additional)[:12],
         "deviceInfoKeys": list(device_info)[:12],
         "stateKeys": state_keys,
+        "labelKeys": _label_keys(item),
     }
 
 
@@ -1158,6 +1262,14 @@ def _summarize_json(data: Any) -> str:
         or ""
     )
     extra = f" payload={','.join(list(payload)[:8])}" if payload else ""
+    payload_data = payload.get("data") if payload else None
+    if isinstance(payload_data, dict):
+        extra += f" pdata={','.join(list(payload_data)[:10])}"
+        desc = desc or payload_data.get("errorDesc") or payload_data.get("errorMsg") or ""
+    elif isinstance(payload_data, str) and payload_data:
+        extra += f" pdata={payload_data[:24]}"
+    elif isinstance(payload_data, list):
+        extra += f" pdata=list:{len(payload_data)}"
     nested = data.get("data")
     if isinstance(nested, dict):
         extra += f" data={','.join(list(nested)[:8])}"
@@ -1169,6 +1281,19 @@ def _summarize_json(data: Any) -> str:
         extra += f" device={','.join(list(device)[:10])}"
     desc_bit = f" desc={str(desc)[:80]}" if desc not in (None, "") else ""
     return f"keys={keys} code={code}{extra}{desc_bit}"
+
+
+def _label_keys(item: dict[str, Any]) -> list[str]:
+    labels = item.get("labels")
+    if isinstance(labels, dict):
+        return [str(key) for key in list(labels)[:24]]
+    if not isinstance(labels, list):
+        return []
+    return [
+        str(row.get("key") or row.get("labelKey") or row.get("name") or "")
+        for row in labels
+        if isinstance(row, dict)
+    ][:24]
 
 
 def _norm_mac(value: str | None) -> str:

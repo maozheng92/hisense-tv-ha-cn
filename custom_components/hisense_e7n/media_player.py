@@ -38,6 +38,7 @@ try:
 except ImportError:  # pragma: no cover
     ServiceValidationError = HomeAssistantError  # type: ignore[misc,assignment]
 
+from .aijia_account import status_text as aijia_status_text
 from .apps import app_media_id, app_summary, format_app_title, resolve_app
 from .entity import HisenseTvEntity, tv_errors
 from .hub import HisenseTvHub, hub_from_entry
@@ -303,6 +304,10 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             "source_id": tv.source_id,
             "power_on_mode": self.hub.power_on_mode,
             "current_app": tv.current_app,
+            "aijia": aijia_status_text(
+                self.hub.aijia,
+                (self.hub.aijia.username if self.hub.aijia else "") or "",
+            ),
             "aijia_account": (self.hub.aijia.username if self.hub.aijia else "") or None,
             "aijia_logged_in": self.hub.aijia_logged_in,
             "apps": [format_app_title(app) for app in tv.apps if format_app_title(app)],

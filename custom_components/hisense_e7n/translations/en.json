@@ -87,7 +87,7 @@
     "step": {
       "init": {
         "title": "Hisense E7N Pro options",
-        "description": "Power-on: {power_on}\nVolume +/-: {volume_up} / {volume_down}\nInput sources: {source_count}\n爱家: {aijia}. Changes apply only after Save.",
+        "description": "爱家: {aijia}\nPower-on: {power_on}\nVolume +/-: {volume_up} / {volume_down}\nInput sources: {source_count}",
         "menu_options": {
           "connection": "Connection",
           "power_on": "Power on",
@@ -156,7 +156,7 @@
       },
       "account": {
         "title": "爱家 account",
-        "description": "Logged in as {aijia}. Submit writes tokens immediately so 浏览媒体 can load 我的应用 before you Save the rest of the options. Submit with an empty account to log out. Password is not stored.",
+        "description": "爱家: {aijia}. Submit writes tokens immediately so 浏览媒体 can load 我的应用 before you Save the rest of the options. Submit with an empty account to log out. Password is not stored.",
         "data": {
           "aijia_username": "Phone / 爱家 account",
           "aijia_password": "Password"

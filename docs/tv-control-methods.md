@@ -257,7 +257,7 @@ E7N Pro 是 VIDAA 机。爱家添加家电会提示打开蓝牙（`flutter_blue_
 
 因此：没有爱家账号 token，HA **不能**克隆「我的应用」列表。VIDAA MQTT `actions/applist` 是 RemoteNOW 路径，爱家不用，这台 E7N 也不回。
 
-1.25.0 起集成可在配置流/选项里用爱家**手机号 + 密码**登录（`POST /mobile/se/signon`，网页客户端 `commonweb` 的 `X-Sign-For`）。令牌写入 config entry，密码不保存；随后拉 `devices/list` 匹配这台电视，再请求 `api/columns` / `mqttAppNameList`。打开仍走 LAN `pushsmartju`。1.25.2 起选项里提交账号后立刻把令牌接到正在运行的 `HisenseTvHub`，不必先点选项菜单「保存」；浏览媒体的提示行不再作为 `MediaType.APP` 走 `play_media`。1.25.3 起在 `devices/list` 之外再请求 `devices/detail` 与 `state/getExtendState`，并把 IoT 的 name/value `states` / JSON 字符串展开成 `mqttAppNameList`。1.25.4 起用配置 MAC 或 `deviceId` 末 12 位补上空的 `wifiId`，且 IoT `payload.errorCode` 不再当成成功。1.25.5 起 `wifiId` 明确是电视网卡 ID 不是 Wi-Fi 名；`getExtendState` 补上 `comModuleId` / `payloadVersion`；栏目只用门户钥做 GET（IoT 钥会 Wrong Signature）。
+1.25.0 起集成可在配置流/选项里用爱家**手机号 + 密码**登录（`POST /mobile/se/signon`，网页客户端 `commonweb` 的 `X-Sign-For`）。令牌写入 config entry，密码不保存；随后拉 `devices/list` 匹配这台电视，再请求 `api/columns` / `mqttAppNameList`。打开仍走 LAN `pushsmartju`。1.25.2 起选项里提交账号后立刻把令牌接到正在运行的 `HisenseTvHub`，不必先点选项菜单「保存」；浏览媒体的提示行不再作为 `MediaType.APP` 走 `play_media`。1.25.3 起在 `devices/list` 之外再请求 `devices/detail` 与 `state/getExtendState`，并把 IoT 的 name/value `states` / JSON 字符串展开成 `mqttAppNameList`。1.25.4 起用配置 MAC 或 `deviceId` 末 12 位补上空的 `wifiId`，且 IoT `payload.errorCode` 不再当成成功。1.25.5 起 `wifiId` 明确是电视网卡 ID 不是 Wi-Fi 名；`getExtendState` 补上 `comModuleId` / `payloadVersion`；栏目只用门户钥做 GET（IoT 钥会 Wrong Signature）。1.25.6 起选项页显示「爱家：未登录」或「爱家：账号（已登录）」；`login4TV` 把 `token` 放进查询参数/表单（上次 JSON 体里服务端读不到）；栏目带 `license`；并请求 IoT `state/value/custom/name/get`（APK 里紧挨 `mqttAppNameList`）。
 
 ## 9. 想对接自己电视时该看哪一层
 
