@@ -241,55 +241,56 @@ def test_fetch_device_identity_reads_deviceid(proto_local_http, monkeypatch) -> 
     assert seen[0].endswith("/..deviceid")
 
 
-def test_launch_local_app_starts_via_commonstarttvapp(proto_local_http, monkeypatch) -> None:
+def test_launch_local_app_opens_by_voice(proto_local_http, monkeypatch) -> None:
     seen: list[tuple[str, bytes | None]] = []
 
     def fake_urlopen(request, timeout=0):
         del timeout
         seen.append((request.full_url, request.data))
-        if request.full_url.endswith(":7779/..commonstarttvapp"):
+        if request.full_url.endswith(":7779/..pushwechatvoice"):
             return _Response(200)
         raise urllib.error.URLError("refused")
 
     monkeypatch.setattr(proto_local_http.urllib.request, "urlopen", fake_urlopen)
     status = proto_local_http.launch_local_app(
-        "192.0.2.10", "com.jamdeo.tv.mediacenter", timeout=0.1
+        "192.0.2.10",
+        "com.jamdeo.tv.mediacenter",
+        name="媒体中心",
+        timeout=0.1,
     )
     assert status == 200
-    assert seen[0][0] == "http://192.0.2.10:7779/..commonstarttvapp"
+    assert seen[0][0] == "http://192.0.2.10:7779/..pushwechatvoice"
     body = json.loads(seen[0][1].decode())
-    assert body["packagename"] == "com.jamdeo.tv.mediacenter"
-    assert body["commandtype"] == "1"
-    assert body["action"] == "android.intent.action.MAIN"
+    assert body["voice"] == "打开媒体中心"
+    assert body["msgchannel"] == 1
+    assert body["msgresource"] == 4
+    assert body["msgtype"] == 6
+    assert proto_local_http.open_app_voice_phrase("媒体中心", "com.jamdeo.tv.mediacenter") == "打开媒体中心"
     assert proto_local_http.is_android_package("com.ktcp.video")
     assert not proto_local_http.is_android_package("netflix")
 
 
-def test_launch_local_app_pushsmartju_adds_launcher_action(
-    proto_local_http, monkeypatch
-) -> None:
-    seen: list[tuple[str, bytes | None]] = []
+def test_launch_local_app_does_not_push_media(proto_local_http, monkeypatch) -> None:
+    seen: list[str] = []
 
     def fake_urlopen(request, timeout=0):
         del timeout
-        seen.append((request.full_url, request.data))
-        if request.full_url.endswith(":7779/..commonstarttvapp"):
+        seen.append(request.full_url)
+        if request.full_url.endswith("/..pushwechatvoice"):
             return _Body(400, b"no")
-        if request.full_url.endswith(":7779/..pushsmartju"):
-            return _Response(200)
-        raise urllib.error.URLError("refused")
+        return _Response(200)
 
     monkeypatch.setattr(proto_local_http.urllib.request, "urlopen", fake_urlopen)
     status = proto_local_http.launch_local_app(
-        "192.0.2.10", "com.android.tv.settings", timeout=0.1
+        "192.0.2.10",
+        "com.android.tv.settings",
+        name="设置",
+        timeout=0.1,
     )
-    assert status == 200
-    ju = next(body for url, body in seen if url.endswith("/..pushsmartju"))
-    payload = json.loads(ju.decode())
-    keys = {item["key"]: item["value"] for item in payload["startupUrl"]}
-    assert keys["packageName"] == "com.android.tv.settings"
-    assert keys["action"] == "android.intent.action.MAIN"
-    assert keys["category"] == "android.intent.category.LAUNCHER"
+    assert status == 400
+    assert seen
+    assert all("/..pushsmartju" not in url for url in seen)
+    assert all("/..commonstarttvapp" not in url for url in seen)
 
 
 def test_launch_app_prefers_local_package(proto_client, monkeypatch) -> None:
@@ -309,9 +310,19 @@ def test_launch_app_prefers_local_package(proto_client, monkeypatch) -> None:
             return Info()
 
     client._client = FakeMqtt()
-    monkeypatch.setattr(proto_client, "launch_local_app", lambda host, package, **kwargs: 200)
+    captured: dict[str, str] = {}
+
+    def fake_launch(host, package, **kwargs):
+        captured["host"] = host
+        captured["package"] = package
+        captured["name"] = kwargs.get("name") or ""
+        return 200
+
+    monkeypatch.setattr(proto_client, "launch_local_app", fake_launch)
     client.launch_app("云视听极光", "com.ktcp.video")
     assert published == []
+    assert captured["package"] == "com.ktcp.video"
+    assert captured["name"] == "云视听极光"
     assert client.state.current_app == "云视听极光"
 
 

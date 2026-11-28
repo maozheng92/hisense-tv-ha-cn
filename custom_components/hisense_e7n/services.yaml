@@ -35,10 +35,10 @@ send_key:
 launch_app:
   name: Launch app
   description: >
-    Open by Android package on LAN (``/..commonstarttvapp``, then
-    ``/..pushsmartju`` with MAIN/LAUNCHER). Do not use MQTT ``launchapp``
-    for packages — the TV treats that as media and shows 播放失败.
-    Store slugs still try MQTT ``launchapp``.
+    Open by speaking 打开{应用名} on LAN ``/..pushwechatvoice`` (same
+    channel as 信号源 / 识图). Do not POST ``/..pushsmartju`` or MQTT
+    ``launchapp`` for packages — the TV treats those as media and shows
+    播放失败. Store slugs still try MQTT ``launchapp``.
   target:
     entity:
       integration: hisense_e7n

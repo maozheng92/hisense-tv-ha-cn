@@ -1147,7 +1147,7 @@ class HisenseTvClient:
         store_type: int = 0,
         package: str | None = None,
     ) -> None:
-        """Open an app. Prefer LAN 「电视打开」 when the target is a package."""
+        """Open an app. Prefer LAN voice 打开{name} when the target is a package."""
         app_url = (url or package or name or "").strip()
         pkg = (package or "").strip()
         if not is_android_package(pkg):
@@ -1168,7 +1168,7 @@ class HisenseTvClient:
             name = str(matched.get("name") or name)
             app_url = str(matched.get("url") or pkg or app_url or name)
         if pkg:
-            status = launch_local_app(self.host, pkg)
+            status = launch_local_app(self.host, pkg, name=name)
             if status is not None and 200 <= status < 300:
                 self.state.current_app = name or pkg
                 self._notify()

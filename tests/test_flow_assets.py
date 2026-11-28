@@ -143,9 +143,9 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_25_9() -> None:
+def test_version_is_1_25_10() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.25.9"
+    assert manifest["version"] == "1.25.10"
     assert not (_ROOT / "www").exists()
     assert not (_ROOT / "select.py").exists()
 

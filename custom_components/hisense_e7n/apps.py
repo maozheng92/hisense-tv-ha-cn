@@ -2,8 +2,8 @@
 
 爱家「电视应用 → 我的应用」is not VIDAA MQTT ``applist``. The APK builds
 that page from cloud launcher columns (``getTvColumnList`` /
-``mqttAppNameList``) and opens a package on LAN (``/..commonstarttvapp``,
-then ``/..pushsmartju`` with MAIN/LAUNCHER).
+``mqttAppNameList``) and opens a package on LAN by voice
+(``打开{应用名}`` on ``/..pushwechatvoice``).
 """
 
 from __future__ import annotations

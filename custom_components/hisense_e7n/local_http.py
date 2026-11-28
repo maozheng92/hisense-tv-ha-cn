@@ -8,11 +8,13 @@ MQTT session, so it still works when the TV never shows a pairing code.
 ``com.android.wechathci`` via ``/..commonstarttvapp``; the picture is then
 fetched from the TV's upload and saved by the integration.
 
-「电视打开」for an installed Android package prefers
-``/..commonstarttvapp`` (same start-app channel as 截屏). ``/..pushsmartju``
-is the 聚好看 jump (``startupType`` 4) and needs ``action`` + LAUNCHER;
-a package-only body is HTTP 400. MQTT ``launchapp`` with the package as
-``url`` makes the TV show 播放失败, so local open never falls back to it.
+Installed apps are opened the same way as 信号源: voice ``打开{应用名}``
+on ``/..pushwechatvoice``. Official web remote LAN control uses that
+channel (``msgtype`` 6). ``/..pushsmartju`` is 聚好看 media push
+(``msgtype`` 2, toast 「正在推送中」) and this E7N shows 播放失败.
+``/..commonstarttvapp`` is the signed screenshot starter, not a generic
+launcher (HTTP 400 with MAIN). MQTT ``launchapp`` with an Android package
+as ``url`` is also 播放失败, so local open never falls back to it.
 """
 
 from __future__ import annotations
@@ -38,8 +40,6 @@ DEFAULT_PROBE_TIMEOUT = 0.35
 VOICE_PORTS = (7779, 7778)
 SCREENSHOT_PORTS = (7779, 7778)
 APP_PORTS = (7779, 7778)
-# intentFlags from 爱家 APK jump templates (云视听 / CIBN / 应用商店).
-_LAUNCH_INTENT_FLAGS = 335544352
 IMAGE_LOOKUP = "https://qrimageurl.hismarttv.com/v5/image/imageurl/by/id"
 # Published by the official web remote as remoteMonitorCommander.
 CAPTURE_PACKAGE = "com.android.wechathci"
@@ -189,87 +189,33 @@ def is_android_package(value: str | None) -> bool:
     return bool(text) and _PACKAGE_RE.fullmatch(text) is not None
 
 
-def launcher_startup_url(package: str) -> list[dict[str, Any]]:
-    """爱家 ``startupUrl`` extras that start a package's launcher activity."""
-    return [
-        {"key": "startupType", "value": 1, "type": "int"},
-        {"key": "intentFlags", "value": _LAUNCH_INTENT_FLAGS, "type": "int"},
-        {"key": "packageName", "value": package, "type": "String"},
-        {"key": "action", "value": "android.intent.action.MAIN", "type": "String"},
-        {"key": "category", "value": "android.intent.category.LAUNCHER", "type": "String"},
-    ]
-
-
-def package_start_attempts(package: str) -> list[tuple[str, dict[str, Any]]]:
-    """LAN bodies to open an installed app. ``commonstarttvapp`` first.
-
-    ``pushsmartju`` without ``action`` is HTTP 400 on this E7N. MQTT
-    ``launchapp`` with the package as ``url`` shows 播放失败 on the TV.
-    """
-    extras = launcher_startup_url(package)
-    return [
-        (
-            "/..commonstarttvapp",
-            {
-                "commandtype": "1",
-                "packagename": package,
-                "action": "android.intent.action.MAIN",
-            },
-        ),
-        ("/..pushsmartju", {"startupType": 4, "startupUrl": extras}),
-        (
-            "/..pushsmartju",
-            {
-                "startupType": 4,
-                "startupUrl": json.dumps(extras, ensure_ascii=False, separators=(",", ":")),
-            },
-        ),
-    ]
+def open_app_voice_phrase(name: str | None, package: str) -> str:
+    """Spoken 打开 command used by 爱家 / 小聚 for an installed app."""
+    label = (name or "").strip()
+    if label and not is_android_package(label):
+        return f"打开{label}"
+    return f"打开{package.strip()}"
 
 
 def launch_local_app(
     host: str,
     package_name: str,
     *,
-    ports: tuple[int, ...] = APP_PORTS,
+    name: str | None = None,
+    ports: tuple[int, ...] = VOICE_PORTS,
     timeout: float = 2.0,
 ) -> int | None:
-    """Open an installed TV app on LAN. Return HTTP status, or None if silent."""
+    """Open an installed TV app via LAN voice. Return HTTP status, or None."""
     package = package_name.strip()
     if not is_android_package(package):
         raise ValueError(f"invalid package: {package_name}")
-    answered: int | None = None
-    for port in ports:
-        port_alive = False
-        for path, body in package_start_attempts(package):
-            result = _exchange(f"http://{host}:{port}{path}", body, timeout)
-            if result is None:
-                continue
-            port_alive = True
-            status, raw = result
-            answered = status
-            detail = _brief_body(raw)
-            if 200 <= status < 300:
-                _LOGGER.info("TV opened %s via %s on port %s", package, path, port)
-                return status
-            _LOGGER.info(
-                "TV 电视打开 %s %s on port %s -> %s %s",
-                package,
-                path,
-                port,
-                status,
-                detail,
-            )
-        if port_alive:
-            break
-    return answered
-
-
-def _brief_body(raw: bytes) -> str:
-    text = raw.decode("utf-8", "replace").strip().replace("\n", " ")
-    if not text:
-        return "-"
-    return text[:240]
+    phrase = open_app_voice_phrase(name, package)
+    status = push_voice(host, phrase, ports=ports, timeout=timeout)
+    if status is not None and 200 <= status < 300:
+        _LOGGER.info("TV 电视打开 %s via voice %s", package, phrase)
+    else:
+        _LOGGER.info("TV 电视打开 %s voice %s -> %s", package, phrase, status)
+    return status
 
 
 def fetch_device_identity(
