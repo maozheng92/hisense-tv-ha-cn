@@ -40,6 +40,9 @@ _LIST_KEYS = _MY_APP_KEYS + (
     "apps",
     "data",
     "packageList",
+    "value",
+    "appInfoList",
+    "appinfo",
 )
 _NESTED_LIST_KEYS = (
     "appList",

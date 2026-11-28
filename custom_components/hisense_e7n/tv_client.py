@@ -226,6 +226,7 @@ class HisenseTvClient:
         self._pin_event: asyncio.Event | None = None
         self._token_event: asyncio.Event | None = None
         self._apps_event: asyncio.Event | None = None
+        self._apps_timers: list[threading.Timer] = []
         self._connect_rc: int = -1
         self._lock = threading.Lock()
         self.ble: Any = None
@@ -394,6 +395,14 @@ class HisenseTvClient:
         if apps:
             self.state.apps = apps
             self._set_loop_event(self._apps_event)
+            _LOGGER.info(
+                "我的应用: %s app(s) %s",
+                len(apps),
+                [item.get("name") for item in apps[:20]],
+            )
+            return
+        if data not in (None, "", [], {}):
+            _LOGGER.info("applist payload did not parse as installed apps: %s", data)
 
     def _handle_message(self, topic: str, payload: bytes) -> None:
         data = _loads(payload)
@@ -430,7 +439,8 @@ class HisenseTvClient:
             self._apply_state(data)
         elif topic.endswith("/data/sourcelist"):
             self._apply_sources(data)
-        elif "applist" in topic:
+        elif "applist" in topic.lower() or topic.lower().endswith("/data/app_list"):
+            _LOGGER.info("MQTT applist topic %s", topic)
             self._apply_apps(data)
         elif "volume" in topic:
             self._apply_volume(data)
@@ -451,16 +461,20 @@ class HisenseTvClient:
         self.state.power_on = True
         self.state.last_error = None
         if self._creds:
-            for topic in topics.subscription_topics(self._creds, self.tv_mac):
+            subscribed = topics.subscription_topics(self._creds, self.tv_mac)
+            for topic in subscribed:
                 client.subscribe(topic, qos=0)
+            _LOGGER.info(
+                "MQTT subscribed %s topics (first %s)",
+                len(subscribed),
+                subscribed[0] if subscribed else "",
+            )
         self._set_loop_event(self._connected_event)
         self._notify()
-        # 爱家 电视应用 → 我的应用. Once per MQTT session (reply on data/applist).
+        # Wait for SUBSCRIBE to stick. Publishing applist in this callback
+        # loses the 我的应用 reply on this TV.
         if self._creds and not self.state.needs_pin and not self.state.pin_requested:
-            try:
-                self.refresh_apps()
-            except (ConnectionError, RuntimeError, OSError):
-                _LOGGER.debug("applist after CONNECT failed", exc_info=True)
+            self._schedule_refresh_apps()
 
     def _cancel_offline_timer(self) -> None:
         with self._offline_lock:
@@ -722,6 +736,7 @@ class HisenseTvClient:
         self._stop.set()
         self._mqtt_epoch += 1
         self._cancel_offline_timer()
+        self._cancel_apps_timers()
         client = self._client
         self._client = None
         if client is None:
@@ -1172,10 +1187,36 @@ class HisenseTvClient:
         self.state.current_app = payload["name"]
         self._notify()
 
+    def _cancel_apps_timers(self) -> None:
+        timers = self._apps_timers
+        self._apps_timers = []
+        for timer in timers:
+            timer.cancel()
+
+    def _schedule_refresh_apps(self) -> None:
+        """Request 我的应用 after SUBSCRIBE, then once more if still empty."""
+        self._cancel_apps_timers()
+        for delay in (0.8, 3.0):
+            timer = threading.Timer(delay, self._refresh_apps_if_empty)
+            timer.daemon = True
+            self._apps_timers.append(timer)
+            timer.start()
+
+    def _refresh_apps_if_empty(self) -> None:
+        if self._stop.is_set() or self.state.apps:
+            return
+        if self.state.needs_pin or self.state.pin_requested:
+            return
+        try:
+            self.refresh_apps()
+        except (ConnectionError, RuntimeError, OSError):
+            _LOGGER.debug("Delayed applist request failed", exc_info=True)
+
     def refresh_apps(self) -> None:
         """Ask the TV for 我的应用. The reply arrives on the applist data topic."""
         try:
             self._publish_action("ui_service", "applist", "")
+            _LOGGER.info("Requested 我的应用 (MQTT applist)")
         except RuntimeError:
             _LOGGER.debug("Cannot request the TV app list", exc_info=True)
 

@@ -1,7 +1,7 @@
 """TV media player for Hisense E7N Pro.
 
-Layout follows TCL: HDMI/custom macros on source_list, installed apps in
-Media Browser (browse_media / play_media). VOLUME_SET is never advertised.
+HDMI/custom macros then 爱家 我的应用 on source_list. Media Browser still
+lists the same apps. VOLUME_SET is never advertised.
 """
 
 from __future__ import annotations
@@ -142,10 +142,16 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
     @property
     def source(self) -> str | None:
         names = self.source_list or []
+        current_app = self.hub.tv.current_app
+        if current_app in names:
+            return current_app
         selected = self.hub.selected_source
         if selected in names:
             return selected
-        return self.hub.tv.source_name
+        source_name = self.hub.tv.source_name
+        if source_name in names:
+            return source_name
+        return source_name or current_app
 
     @property
     def source_list(self) -> list[str] | None:

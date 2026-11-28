@@ -279,11 +279,6 @@
       "tv": {
         "name": "TV"
       }
-    },
-    "select": {
-      "my_apps": {
-        "name": "My apps"
-      }
     }
   },
   "selector": {

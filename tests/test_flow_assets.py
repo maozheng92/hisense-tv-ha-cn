@@ -58,7 +58,7 @@ def test_zh_uses_button_entity_name() -> None:
     assert "entity" in zh
     assert "button" not in zh["entity"]
     assert "remote" not in zh["entity"]
-    assert zh["entity"]["select"]["my_apps"]["name"] == "我的应用"
+    assert "select" not in zh["entity"]
     assert "go_back_choice" not in zh.get("selector", {})
 
 
@@ -137,11 +137,11 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_24_0() -> None:
+def test_version_is_1_24_1() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.24.0"
+    assert manifest["version"] == "1.24.1"
     assert not (_ROOT / "www").exists()
-    assert (_ROOT / "select.py").is_file()
+    assert not (_ROOT / "select.py").exists()
 
 
 def test_sources_menu_save_is_footer_not_row() -> None:

@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .apps import app_choice_name, resolve_app
+from .apps import app_choice_name, app_choice_names, resolve_app
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_CONTROL_USERNAME,
@@ -109,6 +109,10 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
             if name and str(name) not in seen:
                 names.append(str(name))
                 seen.add(str(name))
+        for name in app_choice_names(self.tv.apps):
+            if name not in seen:
+                names.append(name)
+                seen.add(name)
         return names
 
     def configure_power_on(

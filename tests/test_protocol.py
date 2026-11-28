@@ -6,7 +6,7 @@ import time
 
 
 def test_platforms_match_tcl_no_button_entities(proto_const) -> None:
-    assert proto_const.PLATFORMS == ("media_player", "remote", "select")
+    assert proto_const.PLATFORMS == ("media_player", "remote")
     assert proto_const.ATTR_HIDDEN == "hidden"
 
 
@@ -80,7 +80,8 @@ def test_pair_topic_and_subscriptions_are_concrete(proto_client, proto_credentia
     assert proto_client.CONNECT_PAYLOAD["device_type"] == "Mobile App"
     assert proto_topics.vidaa_app_connect(creds).endswith("/actions/vidaa_app_connect")
     subs = proto_topics.subscription_topics(creds)
-    assert not any(item.endswith("#") or "/+" in item for item in subs)
+    assert subs[0] == "/remoteapp/#"
+    assert any(item.endswith("/data/applist") for item in subs)
     assert "/remoteapp/mobile/broadcast/ui_service/state" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/data/volumechange" in subs
@@ -419,17 +420,45 @@ def test_set_volume_steps_via_keys(proto_client, proto_credentials, monkeypatch)
     assert client.state.volume == 13
 
 
-def test_on_connect_requests_applist(proto_client, proto_credentials) -> None:
+def test_applist_message_fills_installed_apps(proto_client) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    payload = (
+        b'[{"name":"Netflix","url":"netflix","urlType":37,"appId":"netflix"},'
+        b'{"name":"Plex","url":"com.plexapp.android","urlType":0,"isLocalApp":1}]'
+    )
+    client._handle_message(
+        "/remoteapp/mobile/broadcast/ui_service/data/applist", payload
+    )
+    assert [item["name"] for item in client.state.apps] == ["Netflix", "Plex"]
+    assert client.state.apps[1]["url"] == "com.plexapp.android"
+
+
+def test_on_connect_requests_applist(proto_client, proto_credentials, monkeypatch) -> None:
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     creds = proto_credentials.generate_dynamic_credentials(
         "aa:bb:cc:dd:ee:ff", timestamp=1
     )
     client._creds = creds
     published: list[tuple[str, str]] = []
+    subscribed: list[str] = []
+
+    class ImmediateTimer:
+        def __init__(self, delay, function, args=None, kwargs=None):
+            del delay
+            self.function = function
+            self.args = args or ()
+            self.kwargs = kwargs or {}
+            self.daemon = True
+
+        def start(self):
+            self.function(*self.args, **self.kwargs)
+
+        def cancel(self):
+            return None
 
     class FakeMqtt:
         def subscribe(self, topic, qos=0):
-            del topic, qos
+            subscribed.append(topic)
 
         def publish(self, topic, body, qos=0, retain=False):
             published.append((topic, body))
@@ -442,9 +471,11 @@ def test_on_connect_requests_applist(proto_client, proto_credentials) -> None:
 
             return Info()
 
+    monkeypatch.setattr(proto_client.threading, "Timer", ImmediateTimer)
     mqtt_client = FakeMqtt()
     client._client = mqtt_client
     client._on_connect(mqtt_client, None, {}, 0)
+    assert subscribed[0] == "/remoteapp/#"
     assert any(topic.endswith("/actions/applist") for topic, _ in published)
     client.state.pin_requested = True
     published.clear()
