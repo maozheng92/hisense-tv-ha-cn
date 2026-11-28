@@ -280,14 +280,8 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
             return
         await self.client.async_launch_app(source)
 
-    async def async_ensure_apps(self, wait: float = 3.0) -> None:
-        """Fetch 我的应用 when the cached list is still empty."""
-        if self.tv.apps:
-            return
-        await self.client.async_refresh_apps(wait)
-
     async def async_refresh_apps(self, wait: float = 3.0) -> None:
-        """Ask the TV again for 电视应用 → 我的应用."""
+        """Probe VIDAA MQTT ``applist`` (RemoteNOW). 爱家 does not use this."""
         await self.client.async_refresh_apps(wait)
 
     async def async_launch_resolved_app(self, app: dict[str, Any]) -> None:
@@ -304,8 +298,6 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
         self.async_set_updated_data(self.client.state)
 
     async def async_launch_app(self, name: str, url: str | None = None) -> None:
-        if not self.tv.apps:
-            await self.client.async_refresh_apps(2.5)
         apps = self.tv.apps
         app = resolve_app(apps, name)
         if app is None and url:

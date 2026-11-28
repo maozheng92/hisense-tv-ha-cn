@@ -78,6 +78,7 @@ def test_resolve_app_matches_package_name_and_substring() -> None:
 
 def test_name_list_and_client_apply(proto_client) -> None:
     apps = load_proto("apps")
+    # mqttAppNameList is the 爱家 cloud-column filter field, not VIDAA MQTT.
     assert [item["name"] for item in apps.normalize_apps({"mqttAppNameList": ["聚好看", "聚好看", ""]})] == [
         "聚好看"
     ]

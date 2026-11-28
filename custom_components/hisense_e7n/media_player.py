@@ -1,7 +1,8 @@
 """TV media player for Hisense E7N Pro.
 
-HDMI/custom macros then 爱家 我的应用 on source_list. Media Browser still
-lists the same apps. VOLUME_SET is never advertised.
+HDMI/custom macros on source_list. 爱家 我的应用 is a cloud column, so the
+media browser is only advertised when a local list actually exists.
+VOLUME_SET is never advertised.
 """
 
 from __future__ import annotations
@@ -62,7 +63,6 @@ _BASE_SUPPORT = (
     | MediaPlayerEntityFeature.NEXT_TRACK
     | MediaPlayerEntityFeature.PREVIOUS_TRACK
     | MediaPlayerEntityFeature.PLAY_MEDIA
-    | MediaPlayerEntityFeature.BROWSE_MEDIA
 )
 
 
@@ -106,6 +106,10 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         features = _BASE_SUPPORT
         if self.source_list:
             features |= MediaPlayerEntityFeature.SELECT_SOURCE
+        # Empty 我的应用 renders HA's 「没有项目」dialog. 爱家 fills that
+        # page from a signed cloud API, so hide browse until a list exists.
+        if self.hub.tv.apps:
+            features |= MediaPlayerEntityFeature.BROWSE_MEDIA
         return features
 
     @property
@@ -221,9 +225,6 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             )
         app = resolve_app(self.hub.tv.apps, media_id)
         if app is None:
-            await self.hub.async_ensure_apps()
-            app = resolve_app(self.hub.tv.apps, media_id)
-        if app is None:
             raise ServiceValidationError(
                 f"Unknown app {media_id!r}; open 我的应用 on this media player"
             )
@@ -240,7 +241,11 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             or media_content_id in ("", "apps")
             or media_content_type in (MediaType.APPS, "apps")
         ):
-            await self.hub.async_ensure_apps()
+            apps = self.hub.tv.apps
+            if not apps:
+                raise BrowseError(
+                    "爱家「我的应用」来自登录后的云端栏目，本机 MQTT 没有这份列表"
+                )
             return BrowseMedia(
                 title="我的应用",
                 media_class=MediaClass.APP,
@@ -248,7 +253,7 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
                 media_content_type=MediaType.APPS,
                 can_play=False,
                 can_expand=True,
-                children=[_app_item(app) for app in self.hub.tv.apps],
+                children=[_app_item(app) for app in apps],
                 children_media_class=MediaClass.APP,
             )
         raise BrowseError("Media not found")

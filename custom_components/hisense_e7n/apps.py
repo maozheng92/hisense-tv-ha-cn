@@ -1,4 +1,10 @@
-"""Installed TV apps, the same list 爱家 shows under 电视应用 → 我的应用."""
+"""Parse an installed-app list if one arrives locally.
+
+爱家「电视应用 → 我的应用」is not VIDAA MQTT ``applist``. The APK builds
+that page from cloud launcher columns (``getTvColumnList`` /
+``mqttAppNameList``) and opens a package with LAN ``/..pushsmartju``.
+This module only normalizes a list the TV (or a caller) already has.
+"""
 
 from __future__ import annotations
 

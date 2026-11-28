@@ -292,7 +292,7 @@
     },
     "launch_app": {
       "name": "打开应用",
-      "description": "打开爱家「电视应用 → 我的应用」里的应用。有 Android 包名时走本机「电视打开」，否则 MQTT launchapp。",
+      "description": "按包名走爱家本机「电视打开」（/..pushsmartju）。列表本身来自爱家云栏目，本机 MQTT 没有。",
       "fields": {
         "name": {
           "name": "应用名",
@@ -306,7 +306,7 @@
     },
     "refresh_apps": {
       "name": "刷新我的应用",
-      "description": "向电视重新拉取「电视应用 → 我的应用」列表。"
+      "description": "探测 VIDAA MQTT applist（RemoteNOW）。爱家「我的应用」不走这条，E7N 通常无回复。"
     }
   },
   "selector": {

@@ -303,7 +303,7 @@
     },
     "launch_app": {
       "name": "Launch app",
-      "description": "Open an app from 爱家 电视应用 → 我的应用.",
+      "description": "Open by Android package via LAN 电视打开 (/..pushsmartju). 爱家's 我的应用 list is a cloud column, not local MQTT.",
       "fields": {
         "name": {
           "name": "App name",
@@ -317,7 +317,7 @@
     },
     "refresh_apps": {
       "name": "Refresh my apps",
-      "description": "Ask the TV for the installed 我的应用 list."
+      "description": "Probe VIDAA MQTT applist (RemoteNOW). 爱家 我的应用 does not use that topic."
     }
   }
 }

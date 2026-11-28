@@ -433,7 +433,10 @@ def test_applist_message_fills_installed_apps(proto_client) -> None:
     assert client.state.apps[1]["url"] == "com.plexapp.android"
 
 
-def test_on_connect_requests_applist(proto_client, proto_credentials, monkeypatch) -> None:
+def test_on_connect_does_not_request_vidaa_applist(
+    proto_client, proto_credentials, monkeypatch
+) -> None:
+    """爱家 我的应用 is cloud columns; do not probe VIDAA applist on connect."""
     client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
     creds = proto_credentials.generate_dynamic_credentials(
         "aa:bb:cc:dd:ee:ff", timestamp=1
@@ -476,8 +479,7 @@ def test_on_connect_requests_applist(proto_client, proto_credentials, monkeypatc
     client._client = mqtt_client
     client._on_connect(mqtt_client, None, {}, 0)
     assert subscribed[0] == "/remoteapp/#"
-    assert any(topic.endswith("/actions/applist") for topic, _ in published)
-    client.state.pin_requested = True
+    assert not any(topic.endswith("/actions/applist") for topic, _ in published)
     published.clear()
-    client._on_connect(mqtt_client, None, {}, 0)
+    client.refresh_status()
     assert not any(topic.endswith("/actions/applist") for topic, _ in published)

@@ -32,9 +32,9 @@ E7N Pro（以及同代 E7N / E7NQ Pro）固件在 2024 之后通常还要：
 
 ## 集成做什么
 
-`custom_components/hisense_e7n`（1.24.1 起打开爱家「电视应用 → 我的应用」；布局仍对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
+`custom_components/hisense_e7n`（1.24.2 起不再把 VIDAA MQTT `applist` 当成爱家「我的应用」；布局仍对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
 
-- `media_player`：开关、音量、静音、自定义/HDMI 输入源、**我的应用**（出现在源列表里，点选即打开）、上一台/下一台；同一份列表也在媒体浏览器。也保留 `hisense_e7n.launch_app` / `refresh_apps`。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量只有 +/-（`VOLUME_STEP`），没有滑块。1.24.0 那个显示 unknown 的 `select`「我的应用」已删除
+- `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台。**打开应用**走爱家本机「电视打开」（`/..pushsmartju`）。爱家「电视应用 → 我的应用」的列表来自登录后的云端栏目（见 [tv-control-methods.md](tv-control-methods.md) §10），本机 MQTT 没有，所以空列表时不再露出媒体浏览器「没有项目」。`hisense_e7n.launch_app` 仍可按包名打开。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量只有 +/-（`VOLUME_STEP`），没有滑块。1.24.0 那个显示 unknown 的 `select`「我的应用」已删除
 - `remote`：与 TCL 一样不另起实体名（`_attr_name = None`，沿用设备名和 remote 平台默认图标）。发送 `KEY_*`（可用 Universal Remote Card）；关机状态下的电源键走同一套开机方式。爱家遥控页上的键（电源、音量、截屏、信号源、AI识图、方向键等）**不会**建成 `button` 实体，仍可通过 `remote.send_command` / `hisense_e7n.send_key` / 自定义输入源宏调用。升级后会删掉旧版留下的 `button.*`。
 - 配置流：先填 IP（连接），再选开机方式，再可选音量加减实体。不需要蓝牙地址。若电视屏幕弹出 4 位数字，调用 `hisense_e7n.submit_code`
 - 选项（对齐 TCL）：草稿菜单「连接 / 开机 / 音量按钮 / 输入源 / 保存」。子表单页脚左侧「返回」、右侧「提交」；**输入源**菜单行只有添加/修改/删除/调整顺序，页脚**左侧「返回」（plain）**、**右侧「保存」（filled）**，不是「提交」。页脚脚本在 `frontend/`，启动时自动安装到 `config/www/hisense_e7n/`（`/local/hisense_e7n/`）。**集成包内不再有 `www/`**（Windows 上 HA 占用该目录会导致无法覆盖更新）。若旧版 `custom_components/hisense_e7n/www` 删不掉，先**停止 Home Assistant** 再删，然后拷新版本。升级后请**硬刷新 HA 前端**。输入源可隐藏、单独设置间隔、用本集成按键或 HA `button.*` 组成序列（勾选 → 重复次数 → 可再加一组），并拖动排序
@@ -73,11 +73,11 @@ data:
   key: KEY_HOME
 ```
 
-打开应用（爱家「电视应用 → 我的应用」）：
+打开应用（爱家「电视打开」，不是云栏目列表）：
 
-1. 媒体播放器的 **源** 下拉（应用名接在自定义/HDMI 后面）
-2. 媒体浏览器 → 我的应用
-3. `hisense_e7n.launch_app`（有 Android 包名时优先本机 `/..pushsmartju`「电视打开」，否则把该行回发给 MQTT `launchapp`）
+爱家 APK **不会**向 VIDAA `:36669` 发 `ui_service/actions/applist`。电视应用页的「我的应用」来自登录后的 `getTvColumnList` / `mqttAppNameList`（账号 + X-SIGN）。HA 没有爱家登录态，所以拉不到那份列表，媒体浏览器空着时不再显示「我的应用 / 没有项目」。
+
+打开已安装包仍走爱家本机口：
 
 ```yaml
 service: hisense_e7n.launch_app
@@ -88,7 +88,7 @@ data:
   url: com.ktcp.video
 ```
 
-列表在 MQTT 订好 `/remoteapp/#` 之后约 0.8 秒发 `ui_service/actions/applist`（连上立刻发会丢回复），3 秒后若仍空再要一次。回复在 `ui_service/data/applist`。打开媒体浏览器或调用 `hisense_e7n.refresh_apps` 也会再要。热门/推荐商店行不会进这份已安装列表。HA 日志里会有 `Requested 我的应用` 和 `我的应用: N app(s)`。
+有 Android 包名时优先 `POST http://<电视IP>:7779/..pushsmartju`（`startupType` 4）。`hisense_e7n.refresh_apps` 只探测 RemoteNOW 的 MQTT `applist`，E7N 通常无回复。
 
 爱家遥控页对应关系：
 

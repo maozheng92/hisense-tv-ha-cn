@@ -471,10 +471,10 @@ class HisenseTvClient:
             )
         self._set_loop_event(self._connected_event)
         self._notify()
-        # Wait for SUBSCRIBE to stick. Publishing applist in this callback
-        # loses the 我的应用 reply on this TV.
-        if self._creds and not self.state.needs_pin and not self.state.pin_requested:
-            self._schedule_refresh_apps()
+        # 爱家 我的应用 is a cloud launcher column, not VIDAA MQTT applist.
+        # Do not publish actions/applist on connect: this E7N stays silent,
+        # and the empty HA media browser is the result. If the TV ever
+        # publishes /data/applist (RemoteNOW), _handle_message still stores it.
 
     def _cancel_offline_timer(self) -> None:
         with self._offline_lock:
@@ -1213,12 +1213,12 @@ class HisenseTvClient:
             _LOGGER.debug("Delayed applist request failed", exc_info=True)
 
     def refresh_apps(self) -> None:
-        """Ask the TV for 我的应用. The reply arrives on the applist data topic."""
+        """Probe VIDAA MQTT ``applist`` (RemoteNOW). 爱家 does not use this."""
         try:
             self._publish_action("ui_service", "applist", "")
-            _LOGGER.info("Requested 我的应用 (MQTT applist)")
+            _LOGGER.info("Requested VIDAA MQTT applist (not 爱家 我的应用)")
         except RuntimeError:
-            _LOGGER.debug("Cannot request the TV app list", exc_info=True)
+            _LOGGER.debug("Cannot request VIDAA MQTT applist", exc_info=True)
 
     def change_channel(self, channel_param: str) -> None:
         self._publish_action(
@@ -1230,7 +1230,6 @@ class HisenseTvClient:
     def refresh_status(self) -> None:
         self._publish_action("ui_service", "gettvstate", "")
         self._publish_action("platform_service", "getvolume", "")
-        self.refresh_apps()
 
     def _refresh_control_password(self) -> None:
         refresh = {"refreshtoken": self.state.refresh_token}

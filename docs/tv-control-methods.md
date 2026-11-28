@@ -233,14 +233,38 @@ E7N Pro 是 VIDAA 机。爱家添加家电会提示打开蓝牙（`flutter_blue_
 
 爱家云 `pushRemoter`、HiConnect 都不是 HA 的主路径：云要账号，HiConnect 是家电发现栈。红外只作为关机后的开机手段，接到 HA 的 remote 或 button 上。
 
-## 8. 想对接自己电视时该看哪一层
+## 8. 爱家「电视应用 → 我的应用」怎么拉列表
+
+空白的 HA 媒体浏览器「我的应用 / 没有项目」不是订晚了 MQTT。爱家 7.0.8.12 的 `libapp.so` **没有** `applist`、`remoteapp`、`launchapp` 这些 VIDAA 主题字符串。列表页在 Flutter `jhk_main_page/pages/tv_page.dart`（`tv_page_vm.dart`），数据是云端栏目，不是机内 `:36669`。
+
+流程：
+
+1. **拉栏目** `getTvColumnList` / `getTvColumnListDataNet` / `getTvColumnListByOnline`  
+   DTO：`home_page_tv_columns_dto.dart`、`home_page_tv_dto.dart`、`home_page_tv_tab_dto.dart`  
+   接口（均需爱家登录 + `jhk_signature`）：
+   - `https://mobile-home-launcher-verif.hismarttv.com/api/columns`
+   - `https://mobile-home-launcher-verif.hismarttv.com/api/mobileMainPage`
+   - `https://mobile-home-launcher-verif.hismarttv.com/api/sideBar`
+2. **按已装应用过滤格子** `filterTile`，字段名 **`mqttAppNameList`**（电视上报给爱家云的已装应用名，不是 VIDAA `data/applist`）
+3. **空位用推荐补** `generateDefaultDataByScene` / `getRecData`：
+   - `https://mobile-aiot.hismarttv.com/vodapptv/5.14/getRecData`
+   - `https://mobile-aiot.hismarttv.com/vodapptv/5.10/sceneParams/data/get`
+   - `https://mobile-aiot.hismarttv.com/vodapptv/5.10/customized/data/get`
+4. **图标** `JhkAppIconDto` / `changeAppIcon`（`MethodChannelJhkUiCommon`）
+5. **能力** `https://mobile-aiot.hismarttv.com/vodapptv/device/5.8/ability`；同网还会 `tryGetCapacitiesFromPort7778`（`GET /..hisharecapacity`，只有能力位，**没有应用列表**）
+
+**打开**才是本机：同网时 `inSameLan` → `POST /..pushsmartju`，`startupType` 4 + `packageName`。HA 已经按这条发「电视打开」。
+
+因此：没有爱家账号 token，HA **不能**克隆「我的应用」列表。VIDAA MQTT `actions/applist` 是 RemoteNOW 路径，爱家不用，这台 E7N 也不回。
+
+## 9. 想对接自己电视时该看哪一层
 
 1. **已登录爱家账号、电视已绑定**：云通道即可。按键走 `/mobilemsg/push/v5.3/remoter`，开关机/场景走 `/4.0/iot/devices/execute`，MQTT 配置走 `/2.0/mqtt/config`。请求需要账号 token 和 `deviceId`。
 2. **手机和电视同一局域网**：先 DLNA/HiConnect 发现，拿到 `ip`+`wifiId`+`ticket`，再调 `HiConnect.control` / `specialControl`。报文 AES，不能只靠明文 HTTP。
 3. **只要传统遥控**：看红外 Activity，与 IP 协议无关。
 4. **投屏**：走 Ju AIoT mirror / LiteAV / WebRTC，不是遥控键值。
 
-## 9. 分析边界
+## 10. 分析边界
 
 - Java 业务被百度加固，无法得到 `HiConnect.java` 的完整封装代码。
 - Dart 是 AOT，只能还原符号和字符串，不能还原完整函数体。
