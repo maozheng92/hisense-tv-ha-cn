@@ -143,9 +143,9 @@ def test_remote_entity_matches_tcl_unnamed_device() -> None:
     assert "mdi:remote" not in text
 
 
-def test_version_is_1_25_10() -> None:
+def test_version_is_1_25_12() -> None:
     manifest = _load("manifest.json")
-    assert manifest["version"] == "1.25.10"
+    assert manifest["version"] == "1.25.12"
     assert not (_ROOT / "www").exists()
     assert not (_ROOT / "select.py").exists()
 
@@ -170,6 +170,19 @@ def test_browse_media_is_always_advertised() -> None:
     )[0]
     assert "_apps_empty_message" in play
     assert 'media_id == "aijia-login"' not in play
+
+
+def test_media_player_exposes_mqtt_volume() -> None:
+    text = (_ROOT / "media_player.py").read_text(encoding="utf-8")
+    assert "VOLUME_SET" in text
+    assert "media_volume_level" in text
+    assert "media_is_volume_muted" in text
+    assert "_handle_coordinator_update" in text
+    hub = (_ROOT / "hub.py").read_text(encoding="utf-8")
+    assert "update_interval=None" in hub
+    assert "VOLUME_POLL_SECONDS" not in hub
+    init_py = (_ROOT / "__init__.py").read_text(encoding="utf-8")
+    assert init_py.index("HisenseTvHub(") < init_py.index("async_connect")
 
 
 def test_sources_menu_save_is_footer_not_row() -> None:

@@ -81,11 +81,18 @@ def test_pair_topic_and_subscriptions_are_concrete(proto_client, proto_credentia
     assert proto_topics.vidaa_app_connect(creds).endswith("/actions/vidaa_app_connect")
     subs = proto_topics.subscription_topics(creds)
     assert subs[0] == "/remoteapp/#"
+    assert subs[1] == "/remoteapp/mobile/broadcast/ui_service/state"
     assert any(item.endswith("/data/applist") for item in subs)
     assert "/remoteapp/mobile/broadcast/ui_service/state" in subs
+    assert "/remoteapp/mobile/broadcast/ui_service/data/state" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/data/volumechange" in subs
     assert "/remoteapp/mobile/broadcast/platform_service/actions/volumechange" in subs
+    assert f"/remoteapp/mobile/{creds.client_id}/platform_service/data/volume" in subs
+    assert f"/remoteapp/mobile/{creds.client_id}/platform_service/data/volumechange" in subs
+    assert f"/remoteapp/mobile/{creds.client_id}/ui_service/state" in subs
+    assert f"/remoteapp/mobile/{creds.client_id}/platform_service/actions/volumechange" in subs
+    assert "/remoteapp/mobile/broadcast/platform_service/data/volume" in subs
 
 
 def test_volume_and_source_parsing(proto_client) -> None:
@@ -97,6 +104,11 @@ def test_volume_and_source_parsing(proto_client) -> None:
     assert client.state.muted is False
     client._apply_volume("40")
     assert client.state.volume == 40
+    client._apply_volume({"data": {"volumeValue": 33, "muteStatus": 1}})
+    assert client.state.volume == 33
+    assert client.state.muted is True
+    client._apply_volume(0.42)
+    assert client.state.volume == 42
     client._apply_sources(
         [{"sourceid": "3", "sourcename": "HDMI1"}, {"sourceid": "0", "sourcename": "TV"}]
     )
@@ -225,11 +237,31 @@ def test_volumechange_mqtt_sets_mute_status(proto_client) -> None:
     )
     assert client.state.volume == 16
     assert client.state.muted is True
+    assert "volumechange" in (client.state.volume_topic or "")
     client._handle_message(
         "/remoteapp/mobile/broadcast/platform_service/actions/volumechange",
         b'{"volume_value": 16, "mute": 0}',
     )
     assert client.state.muted is False
+
+
+def test_getvolume_reply_and_client_volumechange(proto_client, proto_credentials) -> None:
+    client = proto_client.HisenseTvClient("127.0.0.1", uuid="aa:bb:cc:dd:ee:ff")
+    creds = proto_credentials.generate_dynamic_credentials(
+        "aa:bb:cc:dd:ee:ff", timestamp=1
+    )
+    client._handle_message(
+        f"/remoteapp/mobile/{creds.client_id}/platform_service/data/volume",
+        b'{"volume_type": 1, "volume_value": 18}',
+    )
+    assert client.state.volume == 18
+    assert client.state.volume_type == 1
+    client._handle_message(
+        f"/remoteapp/mobile/{creds.client_id}/platform_service/data/volumechange",
+        b'{"volume_type": 2, "volume_value": 1}',
+    )
+    assert client.state.muted is True
+    assert client.state.volume == 18
 
 
 def test_pairing_request_is_only_vidaa_app_connect(proto_client, proto_credentials) -> None:
@@ -348,7 +380,11 @@ def test_volume_step_lan_only_no_mqtt(
     monkeypatch.setattr(client, "_publish_action", publish_action)
     assert client._send_volume_step("KEY_VOLUMEUP", pause=lambda _delay: None) is True
     assert keys == ["KEY_VOLUMEUP"]
-    assert calls == []
+    assert {action for _s, action, _p, _k in calls} == {"gettvstate", "getvolume"}
+    assert not any(action in {"sendkey", "changevolume"} for _s, action, _p, _k in calls)
+    assert client.state.volume == 21
+    assert client.state.volume_topic == "assumed"
+    assert client.state.media_volume_level() == 0.21
 
 
 def test_volume_step_paces_between_presses(
@@ -479,7 +515,13 @@ def test_on_connect_does_not_request_vidaa_applist(
     client._client = mqtt_client
     client._on_connect(mqtt_client, None, {}, 0)
     assert subscribed[0] == "/remoteapp/#"
+    assert any(
+        creds.client_id in topic and topic.endswith("/data/volumechange")
+        for topic in subscribed
+    )
     assert not any(topic.endswith("/actions/applist") for topic, _ in published)
+    assert not any(topic.endswith("/actions/getvolume") for topic, _ in published)
     published.clear()
     client.refresh_status()
     assert not any(topic.endswith("/actions/applist") for topic, _ in published)
+    assert any(topic.endswith("/actions/getvolume") for topic, _ in published)

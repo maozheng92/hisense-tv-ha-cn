@@ -72,7 +72,7 @@ def hub_from_entry(hass: HomeAssistant, entry: ConfigEntry) -> HisenseTvHub:
 
 
 class HisenseTvHub(DataUpdateCoordinator[TvState]):
-    """Expose TV state to entities. Updates come from MQTT, not polling."""
+    """Expose TV state to entities. MQTT push; 爱家 has no volume telemetry."""
 
     def __init__(
         self,
@@ -123,7 +123,8 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
 
     @property
     def tv(self) -> TvState:
-        return self.data or self.client.state
+        """Live client state (MQTT mutates this object)."""
+        return self.client.state
 
     @property
     def visible_source_names(self) -> list[str]:
@@ -203,6 +204,7 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
                 _LOGGER.exception(
                     "Volume button %s.%s failed", call.domain, call.service
                 )
+            await self.hass.async_add_executor_job(self.client.refresh_volume_state)
             return
         key = KEY_VOLUMEUP if delta > 0 else KEY_VOLUMEDOWN
         await self.client.async_send_key(key)

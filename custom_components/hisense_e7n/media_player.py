@@ -2,7 +2,12 @@
 
 HDMI/custom macros on source_list. 爱家 我的应用 is a cloud column; the
 media browser is always advertised so more-info keeps 「浏览媒体」.
-VOLUME_SET is never advertised.
+
+VOLUME_SET is advertised so HA exposes ``volume_level``. Control stays
+LAN KEY_VOLUME +/- (or optional HA buttons). Dragging the slider does
+not send MQTT ``changevolume``. 爱家 itself has no TV volume/mute
+telemetry; mute follows the remoter's local toggle. After a successful
+volume key with no OSD yet, the slider starts at 20 and steps.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ from homeassistant.components.media_player import (
     MediaType,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_platform
@@ -61,12 +66,13 @@ from .keys import (
 _LOGGER = logging.getLogger(__name__)
 _HINT_MEDIA_IDS = frozenset({"", "apps", "aijia-login", "apps-hint", "apps-refresh"})
 
-# No VOLUME_SET: +/- uses MQTT sendkey KEY_VOLUME* + LAN remoter (eARC).
-# VOLUME_STEP only — never a HA slider.
+# VOLUME_SET is required for HA to put volume_level on the state object.
+# Control is still VOLUME_STEP (LAN KEY_VOLUME* / optional HA buttons).
 _BASE_SUPPORT = (
     MediaPlayerEntityFeature.TURN_ON
     | MediaPlayerEntityFeature.TURN_OFF
     | MediaPlayerEntityFeature.VOLUME_MUTE
+    | MediaPlayerEntityFeature.VOLUME_SET
     | MediaPlayerEntityFeature.VOLUME_STEP
     | MediaPlayerEntityFeature.PLAY
     | MediaPlayerEntityFeature.PAUSE
@@ -108,10 +114,22 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
     _attr_name = None
     _attr_icon = "mdi:television"
     _attr_translation_key = "tv"
+    _attr_supported_features = _BASE_SUPPORT
 
     def __init__(self, hub: HisenseTvHub, entry: ConfigEntry) -> None:
         super().__init__(hub, entry)
         self._attr_unique_id = f"{entry.entry_id}_media_player"
+        self._sync_volume_attrs()
+
+    def _sync_volume_attrs(self) -> None:
+        tv = self.hub.tv
+        self._attr_volume_level = tv.media_volume_level()
+        self._attr_is_volume_muted = tv.media_is_volume_muted()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._sync_volume_attrs()
+        super()._handle_coordinator_update()
 
     @property
     def supported_features(self) -> MediaPlayerEntityFeature:
@@ -134,18 +152,13 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
 
     @property
     def volume_level(self) -> float | None:
-        volume = self.hub.tv.volume
-        if volume is None:
-            return None
-        return max(0.0, min(1.0, volume / 100.0))
+        """Current level from ui_service/state, getvolume, or volumechange."""
+        return self.hub.tv.media_volume_level()
 
     @property
     def is_volume_muted(self) -> bool | None:
-        """VIDAA MQTT ``volumechange`` reports mute (``mute`` / type 2)."""
-        tv = self.hub.tv
-        if not tv.available:
-            return None
-        return tv.muted
+        """Mute from the same inbound payloads as volume_level."""
+        return self.hub.tv.media_is_volume_muted()
 
     @property
     def media_title(self) -> str | None:
@@ -179,18 +192,34 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
 
     async def async_volume_up(self) -> None:
         await self.hub.async_send_key(KEY_VOLUMEUP)
+        self._sync_volume_attrs()
         self.async_write_ha_state()
 
     async def async_volume_down(self) -> None:
         await self.hub.async_send_key(KEY_VOLUMEDOWN)
+        self._sync_volume_attrs()
+        self.async_write_ha_state()
+
+    async def async_set_volume_level(self, volume: float) -> None:
+        """HA shows volume_level only with VOLUME_SET. Do not use changevolume."""
+        del volume
+        with tv_errors():
+            await self.hass.async_add_executor_job(
+                self.hub.client.refresh_volume_state
+            )
+        self._sync_volume_attrs()
         self.async_write_ha_state()
 
     async def async_mute_volume(self, mute: bool) -> None:
         tv = self.hub.client.state
-        if tv.muted != mute:
-            with tv_errors():
-                await self.hub.client.async_toggle_mute()
-            self.async_write_ha_state()
+        if tv.muted is None and not mute:
+            return
+        if tv.muted == mute:
+            return
+        with tv_errors():
+            await self.hub.client.async_toggle_mute()
+        self._sync_volume_attrs()
+        self.async_write_ha_state()
 
     async def async_media_play(self) -> None:
         with tv_errors():
@@ -312,6 +341,9 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             "statetype": tv.statetype,
             "auth_mode": tv.auth_mode,
             "source_id": tv.source_id,
+            "volume": tv.volume,
+            "volume_type": tv.volume_type,
+            "volume_topic": tv.volume_topic,
             "power_on_mode": self.hub.power_on_mode,
             "current_app": tv.current_app,
             "aijia": aijia_status_text(

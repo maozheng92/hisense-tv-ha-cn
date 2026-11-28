@@ -74,6 +74,9 @@ VOLUME_KEY_IDLE_WARMUP = 1.5
 VOLUME_CEC_GAP = 0.9
 # When the current level is unknown, drive to 0 then climb (extra downs are no-ops).
 VOLUME_UNKNOWN_FLOOR_STEPS = 100
+# 爱家 has no TV volume telemetry. After a successful KEY_VOLUME, HA needs a
+# number or the slider stays empty. OSD overwrites this if it arrives.
+VOLUME_ASSUMED_START = 20
 # LAN remoter KEY (volume +/-) can drop MQTT 36669 for a moment. Do not flip
 # media_player on→off→on until the broker stays down this long.
 MQTT_DISCONNECT_GRACE = 3.0

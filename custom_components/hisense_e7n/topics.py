@@ -1,9 +1,9 @@
 """VIDAA ``/remoteapp/`` topic helpers.
 
-This TV grants ``/remoteapp/#`` (needed for applist replies that land on
-an unexpected identity). Subscribe the wildcard first, then concrete
-topics. Requesting ``applist`` in the same tick as SUBSCRIBE often loses
-the reply — the client delays that publish.
+This TV grants ``/remoteapp/#`` (applist replies and volume OSD on
+``broadcast/ui_service/state``). Subscribe the wildcard first, then
+concrete topics. Requesting ``applist`` in the same tick as SUBSCRIBE
+often loses the reply — the client delays that publish.
 """
 
 from __future__ import annotations
@@ -98,7 +98,10 @@ _MOBILE_DATA = (
     ("ui_service", "sourcelist"),
     ("ui_service", "applist"),
     ("ui_service", "vidaa_app_connect"),
+    ("ui_service", "volume"),
     ("platform_service", "volume"),
+    ("platform_service", "volumechange"),
+    ("platform_service", "getvolume"),
     ("platform_service", "tokenissuance"),
 )
 
@@ -108,12 +111,17 @@ _WILDCARDS = (
 
 _BROADCASTS = (
     "/remoteapp/mobile/broadcast/ui_service/state",
+    "/remoteapp/mobile/broadcast/ui_service/data/state",
     "/remoteapp/mobile/broadcast/ui_service/data/applist",
     "/remoteapp/mobile/broadcast/ui_service/data/appList",
     "/remoteapp/mobile/broadcast/platform_service/actions/tvsleep",
-    "/remoteapp/mobile/broadcast/platform_service/data/volumechange",
     "/remoteapp/mobile/broadcast/platform_service/actions/volumechange",
+    "/remoteapp/mobile/broadcast/platform_service/data/volumechange",
+    "/remoteapp/mobile/broadcast/ui_service/volume",
+    "/remoteapp/mobile/broadcast/ui_service/data/volume",
     "/remoteapp/mobile/broadcast/platform_service/volume",
+    "/remoteapp/mobile/broadcast/platform_service/data/volume",
+    "/remoteapp/mobile/broadcast/platform_service/data/getvolume",
 )
 
 
@@ -131,6 +139,12 @@ def subscription_topics(creds: MqttCredentials, tv_mac: str | None = None) -> li
     for topic in _BROADCASTS:
         _add(topic)
     for ident in command_identities(creds, tv_mac):
+        _add(f"/remoteapp/mobile/{ident}/ui_service/state")
+        _add(f"/remoteapp/mobile/{ident}/ui_service/data/state")
+        _add(f"/remoteapp/mobile/{ident}/ui_service/volume")
+        _add(f"/remoteapp/mobile/{ident}/platform_service/data/volume")
+        _add(f"/remoteapp/mobile/{ident}/platform_service/actions/volumechange")
+        _add(f"/remoteapp/mobile/{ident}/platform_service/data/volumechange")
         for service, data_type in _MOBILE_DATA:
             _add(f"/remoteapp/mobile/{ident}/{service}/data/{data_type}")
             if data_type == "applist":

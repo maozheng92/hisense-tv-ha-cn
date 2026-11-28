@@ -32,9 +32,9 @@ E7N Pro（以及同代 E7N / E7NQ Pro）固件在 2024 之后通常还要：
 
 ## 集成做什么
 
-`custom_components/hisense_e7n`（1.25.10 起点击浏览媒体打开应用走本机语音 ``打开{应用名}``（``/..pushwechatvoice``，与信号源/识图相同）；不再 POST ``/..pushsmartju``（聚好看推片，电视会提示播放失败）也不再把 Android 包名丢给 MQTT ``launchapp``；1.25.8 起浏览媒体兜底图标改为爱家「我的应用」里的电视预装应用（海信爱家/微信电视/媒体中心等），不再用「热门精选」的云视听；1.25.7 起 `login4TV` 补 `sid`，栏目 license 缺省 `-1`；1.25.6 起选项页显示「爱家：未登录」或「爱家：账号（已登录）」；`login4TV` 把 `token` 放进查询/表单以换 license，并请求 `custom/name/get` 拉 `mqttAppNameList`；1.25.5 起 `getExtendState` 带上设备已有的 `comModuleId` 和 `header.payloadVersion`，栏目改走门户签名的 GET；`wifiId` 是电视网卡 ID（MAC 去冒号），不是路由器 Wi-Fi 名；1.25.4 起用配置里的电视 MAC / 设备 ID 末 12 位补 `wifiId`，`login4TV` 失败会记进日志，IoT 的 errorDesc 不再被当成成功；1.25.3 起登录后会再拉设备详情/`getExtendState` 解析 `mqttAppNameList`（含 name/value 状态表），栏目请求带 `wifiId` 并记下 HTTP 摘要；1.25.2 起选项里提交爱家账号后令牌立刻写入正在运行的集成，「浏览媒体」不再把登录提示当成可播放应用；1.25.1 起更多信息始终有「浏览媒体」；1.25.0 起可登录爱家账号拉取「我的应用」云栏目；1.24.2 起不再把 VIDAA MQTT `applist` 当成爱家列表。布局仍对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
+`custom_components/hisense_e7n`（1.25.12 起 HA 音量 ± 成功后若没有 OSD 则从 20 起步让滑块动；1.25.11 起静音按爱家遥控本地图标切换：爱家 7.0.8.12 没有 TV `volume_value` / `mute_status` / `getvolume` 回传；有 OSD 时仍写入 `volume_level`。1.25.10 起点击浏览媒体打开应用走本机语音 ``打开{应用名}``（``/..pushwechatvoice``，与信号源/识图相同）；不再 POST ``/..pushsmartju``（聚好看推片，电视会提示播放失败）也不再把 Android 包名丢给 MQTT ``launchapp``；1.25.8 起浏览媒体兜底图标改为爱家「我的应用」里的电视预装应用（海信爱家/微信电视/媒体中心等），不再用「热门精选」的云视听；1.25.7 起 `login4TV` 补 `sid`，栏目 license 缺省 `-1`；1.25.6 起选项页显示「爱家：未登录」或「爱家：账号（已登录）」；`login4TV` 把 `token` 放进查询/表单以换 license，并请求 `custom/name/get` 拉 `mqttAppNameList`；1.25.5 起 `getExtendState` 带上设备已有的 `comModuleId` 和 `header.payloadVersion`，栏目改走门户签名的 GET；`wifiId` 是电视网卡 ID（MAC 去冒号），不是路由器 Wi-Fi 名；1.25.4 起用配置里的电视 MAC / 设备 ID 末 12 位补 `wifiId`，`login4TV` 失败会记进日志，IoT 的 errorDesc 不再被当成成功；1.25.3 起登录后会再拉设备详情/`getExtendState` 解析 `mqttAppNameList`（含 name/value 状态表），栏目请求带 `wifiId` 并记下 HTTP 摘要；1.25.2 起选项里提交爱家账号后令牌立刻写入正在运行的集成，「浏览媒体」不再把登录提示当成可播放应用；1.25.1 起更多信息始终有「浏览媒体」；1.25.0 起可登录爱家账号拉取「我的应用」云栏目；1.24.2 起不再把 VIDAA MQTT `applist` 当成爱家列表。布局仍对齐 TCL `tcl_tv`：`HisenseTvHub` + `entry.runtime_data`，选项流草稿/保存，选项表单页脚「返回 | 提交」，输入源菜单页脚「返回 | 保存」）：
 
-- `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台、**浏览媒体**（我的应用）。**打开应用**走爱家本机语音「打开{应用名}」（`/..pushwechatvoice`；Android 包名不再走 `/..pushsmartju` 或 MQTT `launchapp`）。爱家「电视应用 → 我的应用」在配置流/选项里登录爱家账号后，从云端栏目（`getTvColumnList` / `mqttAppNameList`）填充；没登录或栏目为空时浏览媒体仍在，目录里是一句提示而不是 HA 的「没有项目」。`hisense_e7n.launch_app` 仍可按包名打开。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量只有 +/-（`VOLUME_STEP`），没有滑块。1.24.0 那个显示 unknown 的 `select`「我的应用」已删除
+- `media_player`：开关、音量、静音、自定义/HDMI 输入源、上一台/下一台、**浏览媒体**（我的应用）。**打开应用**走爱家本机语音「打开{应用名}」（`/..pushwechatvoice`；Android 包名不再走 `/..pushsmartju` 或 MQTT `launchapp`）。爱家「电视应用 → 我的应用」在配置流/选项里登录爱家账号后，从云端栏目（`getTvColumnList` / `mqttAppNameList`）填充；没登录或栏目为空时浏览媒体仍在，目录里是一句提示而不是 HA 的「没有项目」。`hisense_e7n.launch_app` 仍可按包名打开。**关机后开机按这台电视自己的开机方式**（按钮、红外遥控或网络唤醒），不指望爱家 `KEY_POWER`。音量加减走本机 `KEY_VOLUME*`（`VOLUME_STEP`）；HA 需要 `VOLUME_SET` 才会显示 `volume_level`，拖滑块不会发 `changevolume`。没有 OSD 时，第一次 ± 从 20 起步让滑块跟着动。静音跟爱家遥控一样是按 `KEY_MUTE` 后本地切换。1.24.0 那个显示 unknown 的 `select`「我的应用」已删除
 - `remote`：与 TCL 一样不另起实体名（`_attr_name = None`，沿用设备名和 remote 平台默认图标）。发送 `KEY_*`（可用 Universal Remote Card）；关机状态下的电源键走同一套开机方式。爱家遥控页上的键（电源、音量、截屏、信号源、AI识图、方向键等）**不会**建成 `button` 实体，仍可通过 `remote.send_command` / `hisense_e7n.send_key` / 自定义输入源宏调用。升级后会删掉旧版留下的 `button.*`。
 - 配置流：先填 IP（连接），再选开机方式，再可选音量加减实体，最后可选登录爱家账号（手机号+密码，密码不保存）。不需要蓝牙地址。若电视屏幕弹出 4 位数字，调用 `hisense_e7n.submit_code`
 - 选项（对齐 TCL）：草稿菜单「连接 / 开机 / 音量按钮 / 输入源 / 爱家账号 / 保存」。子表单页脚左侧「返回」、右侧「提交」；**输入源**菜单行只有添加/修改/删除/调整顺序，页脚**左侧「返回」（plain）**、**右侧「保存」（filled）**，不是「提交」。页脚脚本在 `frontend/`，启动时自动安装到 `config/www/hisense_e7n/`（`/local/hisense_e7n/`）。**集成包内不再有 `www/`**（Windows 上 HA 占用该目录会导致无法覆盖更新）。若旧版 `custom_components/hisense_e7n/www` 删不掉，先**停止 Home Assistant** 再删，然后拷新版本。升级后请**硬刷新 HA 前端**。输入源可隐藏、单独设置间隔、用本集成按键或 HA `button.*` 组成序列（勾选 → 重复次数 → 可再加一组），并拖动排序
@@ -125,9 +125,13 @@ data:
 - 开机后第一次切源会先等本机遥控口（7778/7779）就绪，并重试「信号源」，避免丢掉组合里的第一键
 - 已安装应用出现在 `media_player` 的源列表（自定义/HDMI 后面）和媒体浏览器；`media_player.play_media`（`media_content_type: app`）或 `select_source` 填应用名都会打开
 
-## 静音状态
+## 音量与静音状态
 
-VIDAA MQTT 会报静音：主题 `.../platform_service/data/volumechange`（以及 `actions/volumechange`）。载荷里的 `mute` / `mute_status`，或 `volume_type=2` 且 `volume_value` 为 0/1（sehaas），写入 `TvState.muted`，再接到 `media_player.is_volume_muted`。电视离线时该属性为 `None`。本机 HTTP（7778/7779）没有静音状态口；切换静音仍发 `KEY_MUTE`。
+爱家 7.0.8.12 电视遥控**没有**音量/静音回传：`libapp.so` 里没有 VIDAA `volume_value`、`mute_status`、`getvolume`、`volumechange`；静音按钮是 Flutter 本地 `_buttonMute`。本机 `KEY_VOLUME*` / `KEY_MUTE` 是 fire-and-forget。`getVolume` / `changeVolumeStatus` 是家电 IoT（旁边是 `settingTemp` / `VolumeControl.RelativeCommand`），不是电视遥控遥测。
+
+这台 E7N 在 HA 日志里也**没有**出现过 `platform_service/…/volumechange`。有时音量 OSD 会发部分 `ui_service/state`：`{"volume_value":18,"volume_type":1,"state":1}`。1.25.12 先订 **`/remoteapp/#`**，再解析 **type 0 和 1** 为 `volume_level`，type 2 / `mute_status` 为静音。没有这类报文时，HA 加减音量成功后从假定值 20 起步让滑块跟着动（`volume_topic=assumed`），OSD 到了再覆盖。静音在 `KEY_MUTE` 成功后按爱家方式本地切换；音量 ± 会取消本地静音。未知静音不当成未静音。不再每 3 秒轮询 `getvolume`。每个新 MQTT 主题会打一条 `MQTT … <-` 日志。
+
+`volume_type=1` 是 HDMI ARC/eARC 的 CEC 音量（公共集成会丢掉这一路）。`volume_type=2` 且值为 0/1 是静音。加减仍发本机 `KEY_VOLUME*`，静音仍发 `KEY_MUTE`。实体属性 `volume_topic` 和日志 `MQTT volume from …` 标明实际进站主题。
 
 ## 添加集成时报「无法连接 36669」
 

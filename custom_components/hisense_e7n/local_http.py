@@ -156,6 +156,7 @@ class ScreenCapture:
     image: bytes
     note: str
     source_url: str
+    info: dict | None = None
 
 
 def push_voice(
@@ -309,7 +310,12 @@ def capture_screen(
         if not image_url:
             continue
         image = _download(image_url, timeout)
-        return ScreenCapture(image=image, note=_capture_note(info), source_url=image_url)
+        return ScreenCapture(
+            image=image,
+            note=_capture_note(info),
+            source_url=image_url,
+            info=info if isinstance(info, dict) else None,
+        )
     raise RuntimeError("电视没有把画面传回来")
 
 
