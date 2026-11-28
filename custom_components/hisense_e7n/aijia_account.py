@@ -45,6 +45,11 @@ HOMEPAGE_LAYOUT = "/4.0/iot/layout/smartHomeApp/common"
 DEVICE_DETAIL = "/4.0/iot/devices/detail"
 EXTEND_STATE = "/4.0/iot/state/getExtendState"
 HOMEPAGE_CONFIG = "/4.0/iot/devices/function/getHomepageConfig"
+FIND_BY_WIFI = "/4.0/iot/devices/findByWifiId"
+FIND_BY_SERIAL = "/4.0/iot/devices/findBySerialNumber"
+REFRESH_STATE = "/4.0/iot/state/refreshDeviceState"
+BATCH_LABELS = "/4.0/iot/devices/batchGetLabels"
+TV_ACTIVATION = "/4.0/iot/tv/activation/query"
 TOKEN_TTL_DEFAULT = 259200.0
 _TV_HINTS = (
     "电视",
@@ -288,10 +293,16 @@ def devices_from_response(body: Any) -> list[dict[str, Any]]:
         payload = body.get("payload")
         if isinstance(payload, dict):
             nodes.append(payload.get("devices"))
+            if isinstance(payload.get("device"), dict):
+                nodes.append([payload["device"]])
         nodes.append(body.get("devices"))
+        if isinstance(body.get("device"), dict):
+            nodes.append([body["device"]])
         data = body.get("data")
         if isinstance(data, dict):
             nodes.append(data.get("devices"))
+            if isinstance(data.get("device"), dict):
+                nodes.append([data["device"]])
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for node in nodes:
@@ -404,49 +415,53 @@ async def async_fetch_apps(
         devices, host=host, mac=mac, device_id=current.device_id or None
     )
     targets: list[dict[str, Any]] = [tv] if tv is not None else list(devices[:3])
+    bound: dict[str, Any] | None = tv or (targets[0] if targets else None)
     for item in targets:
-        current = replace(
-            current,
-            device_id=str(item.get("deviceId") or current.device_id),
-            wifi_id=str(item.get("wifiId") or item.get("wifiid") or current.wifi_id),
-        )
+        current = _tokens_for_device(current, item, mac=mac)
         apps = extract_cloud_apps(item)
         if apps:
             _LOGGER.info(
                 "爱家从设备 %s 解析到 %s 个应用", current.device_id, len(apps)
             )
             return current, apps
-        for blob in await _device_extra_blobs(session, current, traces):
+        for blob in await _device_extra_blobs(session, current, item, traces):
             apps = extract_cloud_apps(blob)
             if apps:
                 _LOGGER.info(
                     "爱家从设备 %s 解析到 %s 个应用", current.device_id, len(apps)
                 )
                 return current, apps
-    if tv is not None:
-        current = replace(
-            current,
-            device_id=str(tv.get("deviceId") or current.device_id),
-            wifi_id=str(tv.get("wifiId") or tv.get("wifiid") or current.wifi_id),
-        )
-    if current.device_id:
-        current = await _try_tv_login_id(session, current)
+    if bound is not None:
+        current = _tokens_for_device(current, bound, mac=mac)
+        current, extra_apps = await _enrich_device(session, current, bound, mac, traces)
+        if extra_apps:
+            _LOGGER.info(
+                "爱家从设备 %s 解析到 %s 个应用", current.device_id, len(extra_apps)
+            )
+            return current, extra_apps
+    elif mac:
+        current = replace(current, wifi_id=current.wifi_id or _norm_mac(mac))
+    if current.device_id or current.wifi_id:
+        current = await _try_tv_login_id(session, current, traces)
     for candidate in await _column_candidates(session, current, traces):
         apps = extract_cloud_apps(candidate)
         if apps:
             _LOGGER.info(
-                "爱家栏目解析到 %s 个应用 (deviceId=%s)",
+                "爱家栏目解析到 %s 个应用 (deviceId=%s wifiId=%s)",
                 len(apps),
                 current.device_id,
+                current.wifi_id,
             )
             return current, apps
     summaries = [_device_summary(item) for item in devices[:3]]
     _LOGGER.warning(
-        "爱家已登录但未解析到我的应用 devices=%s tv=%s summaries=%s traces=%s",
+        "爱家已登录但未解析到我的应用 devices=%s tv=%s wifiId=%s tvLoginedId=%s summaries=%s traces=%s",
         len(devices),
         current.device_id or "-",
+        current.wifi_id or "-",
+        (current.tv_login_id or "-")[:12],
         summaries,
-        "; ".join(traces[:16]) or "-",
+        "; ".join(traces[:24]) or "-",
     )
     return current, []
 
@@ -478,33 +493,123 @@ async def async_list_devices(session: Any, tokens: AijiaTokens) -> list[dict[str
     return collected
 
 
+def _tokens_for_device(
+    tokens: AijiaTokens, item: dict[str, Any], *, mac: str | None = None
+) -> AijiaTokens:
+    wifi = (
+        _wifi_from_device(item)
+        or _norm_mac(mac)
+        or _wifi_from_device_id(item)
+        or tokens.wifi_id
+    )
+    return replace(
+        tokens,
+        device_id=str(item.get("deviceId") or tokens.device_id),
+        wifi_id=wifi,
+    )
+
+
+def _partner_id(item: dict[str, Any]) -> str:
+    partner = item.get("partner") if isinstance(item.get("partner"), dict) else {}
+    return str(partner.get("id") or partner.get("partnerId") or item.get("partnerId") or "")
+
+
 async def _device_extra_blobs(
-    session: Any, tokens: AijiaTokens, traces: list[str]
+    session: Any,
+    tokens: AijiaTokens,
+    item: dict[str, Any],
+    traces: list[str],
 ) -> list[Any]:
-    extra = {
-        "deviceId": tokens.device_id,
-        "wifiId": tokens.wifi_id,
-        "customerId": tokens.customer_id,
-        "sourceType": 20,
-        "partnerId": "1001",
-    }
-    extra = {key: value for key, value in extra.items() if value not in ("", None)}
+    partner = _partner_id(item) or "1001"
+    extras = [
+        {"deviceId": tokens.device_id, "partnerId": partner},
+        {
+            "deviceId": tokens.device_id,
+            "wifiId": tokens.wifi_id,
+            "homeId": str(item.get("homeId") or ""),
+            "serialNumber": str(item.get("serialNumber") or ""),
+            "partnerId": partner,
+        },
+    ]
     found: list[Any] = []
-    for path in (DEVICE_DETAIL, EXTEND_STATE, HOMEPAGE_CONFIG):
+    seen_paths: set[str] = set()
+    for extra in extras:
+        extra = {key: value for key, value in extra.items() if value not in ("", None)}
+        for path in (DEVICE_DETAIL, EXTEND_STATE, HOMEPAGE_CONFIG, REFRESH_STATE):
+            key = f"{path}:{sorted(extra)}"
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            try:
+                body = await _iot_post(session, tokens, path, extra)
+            except AijiaError as err:
+                traces.append(f"{path}:{err}")
+                continue
+            if not body:
+                traces.append(f"{path}:empty")
+                continue
+            traces.append(f"{path}:{_summarize_json(body)}")
+            apps = extract_cloud_apps(body)
+            if _iot_ok(body) or apps:
+                found.append(body)
+                if apps:
+                    return found
+    return found
+
+
+async def _enrich_device(
+    session: Any,
+    tokens: AijiaTokens,
+    item: dict[str, Any],
+    mac: str | None,
+    traces: list[str],
+) -> tuple[AijiaTokens, list[dict[str, Any]]]:
+    """Resolve wifiId via findBy* then retry extend-state if still empty."""
+    lookups: list[tuple[str, dict[str, Any]]] = []
+    wifi = tokens.wifi_id or _norm_mac(mac)
+    serial = str(item.get("serialNumber") or "")
+    if wifi:
+        lookups.append((FIND_BY_WIFI, {"wifiId": wifi}))
+    if serial:
+        lookups.append((FIND_BY_SERIAL, {"serialNumber": serial}))
+    if tokens.device_id:
+        lookups.append(
+            (
+                BATCH_LABELS,
+                {
+                    "deviceIds": [tokens.device_id],
+                    "partnerId": _partner_id(item) or "1001",
+                },
+            )
+        )
+        lookups.append((TV_ACTIVATION, {"deviceId": tokens.device_id}))
+    found_apps: list[dict[str, Any]] = []
+    for path, extra in lookups:
         try:
             body = await _iot_post(session, tokens, path, extra)
         except AijiaError as err:
             traces.append(f"{path}:{err}")
             continue
-        if body:
-            traces.append(f"{path}:{_summarize_json(body)}")
-            found.append(body)
-        else:
-            traces.append(f"{path}:empty")
-    return found
+        traces.append(f"{path}:{_summarize_json(body)}")
+        for device in devices_from_response(body):
+            tokens = _tokens_for_device(tokens, device, mac=mac)
+        if isinstance(body, dict):
+            payload = body.get("payload") if isinstance(body.get("payload"), dict) else body
+            if isinstance(payload, dict):
+                nested = payload.get("device") if isinstance(payload.get("device"), dict) else payload
+                if isinstance(nested, dict):
+                    tokens = _tokens_for_device(tokens, nested, mac=mac)
+        apps = extract_cloud_apps(body)
+        if apps:
+            found_apps = apps
+            break
+    return tokens, found_apps
 
 
-async def _try_tv_login_id(session: Any, tokens: AijiaTokens) -> AijiaTokens:
+async def _try_tv_login_id(
+    session: Any, tokens: AijiaTokens, traces: list[str] | None = None
+) -> AijiaTokens:
+    traces = traces if traces is not None else []
     payload = {
         "accessToken": tokens.access_token,
         "customerId": tokens.customer_id,
@@ -514,31 +619,35 @@ async def _try_tv_login_id(session: Any, tokens: AijiaTokens) -> AijiaTokens:
         "distributeId": DISTRIBUTE_ID,
     }
     body = compact_json({key: value for key, value in payload.items() if value})
-    try:
-        status, result = await _request_json(
-            session,
-            "POST",
-            TV_TOKEN_URL,
-            headers=signed_headers(body, tokens.access_token),
-            data=body,
-        )
-    except AijiaError:
-        return tokens
-    if status >= 400 or not isinstance(result, dict):
-        return tokens
-    data = result.get("data") if isinstance(result.get("data"), dict) else result
-    if not isinstance(data, dict):
-        return tokens
-    login_id = str(
-        data.get("tvLoginedId")
-        or data.get("tvLoginId")
-        or data.get("token")
-        or data.get("accessToken")
-        or ""
-    ).strip()
-    if not login_id:
-        return tokens
-    return replace(tokens, tv_login_id=login_id)
+    result: Any = None
+    for secret in (IOT_SIGN_SECRET, APP_SECRET):
+        try:
+            status, result = await _request_json(
+                session,
+                "POST",
+                TV_TOKEN_URL,
+                headers=signed_headers(body, tokens.access_token, secret=secret),
+                data=body,
+            )
+        except AijiaError as err:
+            traces.append(f"login4TV:{err}")
+            continue
+        traces.append(f"login4TV {status} {_summarize_json(result)}")
+        if not isinstance(result, dict) or status >= 400:
+            continue
+        data = result.get("data") if isinstance(result.get("data"), dict) else result
+        if not isinstance(data, dict):
+            continue
+        login_id = str(
+            data.get("tvLoginedId")
+            or data.get("tvLoginId")
+            or data.get("token")
+            or data.get("accessToken")
+            or ""
+        ).strip()
+        if login_id:
+            return replace(tokens, tv_login_id=login_id)
+    return tokens
 
 
 async def _column_candidates(
@@ -556,16 +665,19 @@ async def _column_candidates(
         ACTIVITY_RESOURCES_URL,
     )
     found: list[Any] = []
-    secrets = (APP_SECRET, IOT_SIGN_SECRET)
+    secrets = (IOT_SIGN_SECRET, APP_SECRET)
+    identity = _identity_headers(tokens)
     for url in urls:
         short = url.rsplit("/", 1)[-1]
         for secret in secrets:
+            headers = signed_headers(body, tokens.access_token, secret=secret)
+            headers.update(identity)
             try:
                 status, result = await _request_json(
                     session,
                     "POST",
                     url,
-                    headers=signed_headers(body, tokens.access_token, secret=secret),
+                    headers=headers,
                     data=body,
                 )
             except AijiaError as err:
@@ -586,20 +698,31 @@ async def _column_candidates(
             "distributeId": DISTRIBUTE_ID,
         }
         params = {key: value for key, value in params.items() if value}
-        try:
-            status, result = await _request_json(
-                session,
-                "GET",
-                url,
-                headers=signed_headers(compact_json(params), tokens.access_token),
-                params=params,
-            )
-        except AijiaError as err:
-            traces.append(f"GET {short}:{err}")
+        query_sign = "&".join(f"{key}={params[key]}" for key in sorted(params))
+        get_ok = False
+        for secret in secrets:
+            sign_src = query_sign or compact_json(params)
+            headers = signed_headers(sign_src, tokens.access_token, secret=secret)
+            headers.update(identity)
+            try:
+                status, result = await _request_json(
+                    session,
+                    "GET",
+                    url,
+                    headers=headers,
+                    params=params,
+                )
+            except AijiaError as err:
+                traces.append(f"GET {short}:{err}")
+                continue
+            traces.append(f"GET {short} {status} {_summarize_json(result)}")
+            if status < 400 and result not in (None, "", [], {}):
+                found.append(result)
+                get_ok = True
+                if extract_cloud_apps(result):
+                    return found
+        if not get_ok:
             continue
-        traces.append(f"GET {short} {status} {_summarize_json(result)}")
-        if status < 400 and result not in (None, "", [], {}):
-            found.append(result)
     try:
         layout = await _iot_post(
             session,
@@ -618,6 +741,21 @@ async def _column_candidates(
         traces.append(f"layout:{_summarize_json(layout)}")
         found.append(layout)
     return found
+
+
+def _identity_headers(tokens: AijiaTokens) -> dict[str, str]:
+    extra = {
+        "customerId": tokens.customer_id,
+        "deviceId": tokens.device_id,
+        "wifiId": tokens.wifi_id,
+        "tvLoginedId": tokens.tv_login_id,
+        "tvToken": tokens.tv_login_id,
+        "distributeId": DISTRIBUTE_ID,
+        "serverCode": SERVER_CODE,
+        "versionName": APP_VERSION,
+        "platformFlag": "1",
+    }
+    return {key: value for key, value in extra.items() if value}
 
 
 def _column_payload(tokens: AijiaTokens) -> dict[str, Any]:
@@ -645,6 +783,7 @@ async def _iot_post(
 ) -> dict[str, Any]:
     errors: list[str] = []
     denied = False
+    last: dict[str, Any] = {}
     for secret in (APP_SECRET, IOT_SIGN_SECRET):
         for body in (_iot_body_hialife(tokens, extra), _iot_body_hisenseha(tokens, extra)):
             raw = compact_json(body)
@@ -664,15 +803,19 @@ async def _iot_post(
                 errors.append(f"HTTP {status}")
                 continue
             if isinstance(result, dict) and (
-                _iot_ok(result) or devices_from_response(result) or result.get("payload")
+                _iot_ok(result) or devices_from_response(result)
             ):
                 return result
-            errors.append(f"HTTP {status}")
+            if isinstance(result, dict):
+                last = result
+                errors.append(_summarize_json(result))
+            else:
+                errors.append(f"HTTP {status}")
     if denied:
         _LOGGER.warning("爱家 IoT %s 返回 401/403，改走栏目接口", path)
     else:
         _LOGGER.debug("爱家 IoT %s 未成功: %s", path, "; ".join(errors))
-    return {}
+    return last
 
 
 def _iot_body_hialife(tokens: AijiaTokens, extra: dict[str, Any]) -> dict[str, Any]:
@@ -713,9 +856,11 @@ def _iot_body_hisenseha(tokens: AijiaTokens, extra: dict[str, Any]) -> dict[str,
 
 def _iot_ok(body: dict[str, Any]) -> bool:
     payload = body.get("payload")
-    if isinstance(payload, dict) and str(payload.get("status") or "").upper() == "SUCCESS":
-        return True
-    return False
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("errorCode") not in (None, "", 0, "0"):
+        return False
+    return str(payload.get("status") or "").upper() == "SUCCESS"
 
 
 async def _request_json(
@@ -868,6 +1013,8 @@ def _is_named_state(item: Any) -> bool:
 
 def _device_summary(item: dict[str, Any]) -> dict[str, Any]:
     product = item.get("product") if isinstance(item.get("product"), dict) else {}
+    additional = item.get("additional") if isinstance(item.get("additional"), dict) else {}
+    device_info = item.get("deviceInfo") if isinstance(item.get("deviceInfo"), dict) else {}
     states = item.get("states")
     state_keys: list[str] = []
     if isinstance(states, dict):
@@ -880,11 +1027,14 @@ def _device_summary(item: dict[str, Any]) -> dict[str, Any]:
         ][:24]
     return {
         "deviceId": str(item.get("deviceId") or "")[:12],
-        "wifiId": str(item.get("wifiId") or "")[:12],
+        "wifiId": (_wifi_from_device(item) or str(item.get("wifiId") or ""))[:12],
+        "partnerId": _partner_id(item),
         "nickname": item.get("nickname") or item.get("deviceName") or item.get("name"),
         "categoryCode": item.get("categoryCode"),
         "product": product.get("name") or product.get("code"),
         "topKeys": list(item)[:16],
+        "additionalKeys": list(additional)[:12],
+        "deviceInfoKeys": list(device_info)[:12],
         "stateKeys": state_keys,
     }
 
@@ -893,24 +1043,98 @@ def _summarize_json(data: Any) -> str:
     if data in (None, "", [], {}):
         return "empty"
     if not isinstance(data, dict):
-        return type(data).__name__
+        text = str(data)
+        return text[:80] if text else type(data).__name__
     keys = ",".join(str(key) for key in list(data)[:10])
-    code = data.get("resultCode", data.get("code", data.get("errorCode", "")))
-    payload = data.get("payload") if isinstance(data.get("payload"), dict) else None
+    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+    code = data.get(
+        "resultCode",
+        data.get("code", data.get("errorCode", payload.get("errorCode", ""))),
+    )
+    desc = (
+        data.get("errorDesc")
+        or data.get("error")
+        or data.get("message")
+        or payload.get("errorDesc")
+        or payload.get("errorMessage")
+        or payload.get("message")
+        or ""
+    )
     extra = f" payload={','.join(list(payload)[:8])}" if payload else ""
-    return f"keys={keys} code={code}{extra}"
+    desc_bit = f" desc={str(desc)[:80]}" if desc not in (None, "") else ""
+    return f"keys={keys} code={code}{extra}{desc_bit}"
 
 
 def _norm_mac(value: str | None) -> str:
     return "".join(ch for ch in (value or "").lower() if ch.isalnum())
 
 
+_WIFI_KEYS = (
+    "wifiId",
+    "wifiid",
+    "wifiID",
+    "mac",
+    "macAddress",
+    "deviceMac",
+    "wifiMac",
+    "staMac",
+    "wifi_mac",
+)
+
+
+def _looks_like_mac(value: str) -> bool:
+    return len(value) == 12 and all(ch in "0123456789abcdef" for ch in value)
+
+
+def _wifi_from_mapping(item: dict[str, Any]) -> str:
+    for key in _WIFI_KEYS:
+        candidate = _norm_mac(str(item.get(key) or ""))
+        if _looks_like_mac(candidate):
+            return candidate
+    return ""
+
+
+def _wifi_from_device(item: dict[str, Any]) -> str:
+    found = _wifi_from_mapping(item)
+    if found:
+        return found
+    for nest_key in ("additional", "deviceInfo", "partner", "wifiInfo", "product", "room"):
+        nest = item.get(nest_key)
+        if isinstance(nest, str):
+            nest = _inflate(nest)
+        if isinstance(nest, dict):
+            found = _wifi_from_device(nest)
+            if found:
+                return found
+    labels = item.get("labels")
+    if isinstance(labels, list):
+        for row in labels:
+            if not isinstance(row, dict):
+                continue
+            key = str(row.get("key") or row.get("labelKey") or row.get("name") or "")
+            if key in _WIFI_KEYS or key.casefold() in {"wifiid", "mac", "macaddress"}:
+                candidate = _norm_mac(str(row.get("value") or row.get("labelValue") or ""))
+                if _looks_like_mac(candidate):
+                    return candidate
+    com = _norm_mac(str(item.get("comModuleId") or ""))
+    if _looks_like_mac(com):
+        return com
+    return ""
+
+
+def _wifi_from_device_id(item: dict[str, Any]) -> str:
+    device_id = _norm_mac(str(item.get("deviceId") or ""))
+    suffix = device_id[-12:] if len(device_id) >= 12 else ""
+    return suffix if _looks_like_mac(suffix) else ""
+
+
 def _mac_in_device(item: dict[str, Any], mac: str) -> bool:
-    for key in ("wifiId", "wifiid", "mac", "macAddress", "deviceMac"):
-        raw = str(item.get(key) or "")
-        if raw and _norm_mac(raw) == mac:
-            return True
-    return bool(mac) and mac in _norm_mac(json.dumps(item, ensure_ascii=False))
+    if not mac:
+        return False
+    wifi = _wifi_from_device(item) or _wifi_from_device_id(item)
+    if wifi == mac:
+        return True
+    return mac in _norm_mac(json.dumps(item, ensure_ascii=False))
 
 
 def _host_in_device(item: dict[str, Any], host: str) -> bool:

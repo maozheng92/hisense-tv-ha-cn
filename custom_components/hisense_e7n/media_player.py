@@ -224,7 +224,7 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
             raise ServiceValidationError(
                 f"Unsupported media type {media_type!r}; use app"
             )
-        await self._async_ensure_cloud_apps()
+        await self._async_ensure_cloud_apps(force=media_id in _HINT_MEDIA_IDS)
         if media_id in _HINT_MEDIA_IDS:
             if self.hub.tv.apps:
                 return
@@ -252,7 +252,9 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         ):
             apps = list(self.hub.tv.apps)
             if not apps:
-                await self._async_ensure_cloud_apps()
+                await self._async_ensure_cloud_apps(
+                    force=media_content_id in ("apps-refresh", "aijia-login")
+                )
                 apps = list(self.hub.tv.apps)
             children = [_app_item(app) for app in apps]
             if children:
@@ -285,7 +287,7 @@ class HisenseTvMediaPlayer(HisenseTvEntity, MediaPlayerEntity):
         if self.hub.tv.apps and not force:
             return
         try:
-            await self.hub.async_refresh_aijia_apps()
+            await self.hub.async_refresh_aijia_apps(force=force)
         except HomeAssistantError:
             raise
         except Exception:  # noqa: BLE001

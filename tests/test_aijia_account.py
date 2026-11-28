@@ -336,6 +336,124 @@ def test_fetch_apps_from_extend_state() -> None:
     asyncio.run(_run())
 
 
+def test_wifi_from_nested_additional_and_device_id() -> None:
+    account = _account()
+    nested = {
+        "deviceId": "86100300900000300000050593af4296",
+        "additional": {"wifiId": "AA:BB:CC:DD:EE:FF"},
+        "categoryCode": "connector.device.type.TV",
+    }
+    assert account._wifi_from_device(nested) == "aabbccddeeff"
+    bare = {"deviceId": "86100300900000300000050593af4296"}
+    assert account._wifi_from_device(bare) == ""
+    assert account._wifi_from_device_id(bare) == "050593af4296"
+
+
+def test_fetch_apps_fills_wifi_id_from_config_mac() -> None:
+    account = _account()
+    session = FakeSession(
+        {
+            "/4.0/iot/home/list": {
+                "payload": {"status": "SUCCESS", "homes": [{"id": "home-1"}]}
+            },
+            "/4.0/iot/devices/list": {
+                "payload": {
+                    "status": "SUCCESS",
+                    "devices": [
+                        {
+                            "deviceId": "86100300900000300000050593af4296",
+                            "categoryCode": "connector.device.type.TV",
+                            "nickname": "客厅电视",
+                            "states": [{"name": "onlineStatus", "value": "1"}],
+                        }
+                    ],
+                }
+            },
+            "/api/columns": {
+                "mqttAppNameList": [
+                    {
+                        "name": "云视听极光",
+                        "packageName": "com.ktcp.video",
+                        "isLocalApp": 1,
+                    }
+                ]
+            },
+        }
+    )
+
+    async def _run():
+        tokens = account.AijiaTokens(access_token="tok", customer_id="c1")
+        updated, apps = await account.async_fetch_apps(
+            session, tokens, mac="aa:bb:cc:dd:ee:ff"
+        )
+        assert updated.wifi_id == "aabbccddeeff"
+        assert [item["name"] for item in apps] == ["云视听极光"]
+
+    asyncio.run(_run())
+
+
+def test_fetch_skips_iot_error_payload_then_reads_extend_state() -> None:
+    account = _account()
+    session = FakeSession(
+        {
+            "/4.0/iot/home/list": {
+                "payload": {"status": "SUCCESS", "homes": [{"id": "home-1"}]}
+            },
+            "/4.0/iot/devices/list": {
+                "payload": {
+                    "status": "SUCCESS",
+                    "devices": [
+                        {
+                            "deviceId": "tv-1",
+                            "wifiId": "aabbccddeeff",
+                            "categoryCode": "connector.device.type.tv",
+                            "nickname": "客厅电视",
+                            "states": [{"name": "onlineStatus", "value": "1"}],
+                        }
+                    ],
+                }
+            },
+            "/4.0/iot/devices/detail": {
+                "payload": {
+                    "status": "FAIL",
+                    "errorCode": "400",
+                    "errorDesc": "partner mismatch",
+                }
+            },
+            "/4.0/iot/state/getExtendState": {
+                "payload": {
+                    "status": "SUCCESS",
+                    "mqttAppNameList": [
+                        {
+                            "name": "健身镜",
+                            "packageName": "com.hisense.fitness",
+                            "isLocalApp": 1,
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    async def _run():
+        tokens = account.AijiaTokens(access_token="tok", customer_id="c1")
+        updated, apps = await account.async_fetch_apps(session, tokens)
+        assert updated.device_id == "tv-1"
+        assert [item["name"] for item in apps] == ["健身镜"]
+
+    asyncio.run(_run())
+
+
+def test_summarize_json_includes_error_desc() -> None:
+    account = _account()
+    text = account._summarize_json({"resultCode": 1, "errorDesc": "wifiId不能为空"})
+    assert "wifiId不能为空" in text
+    nested = account._summarize_json(
+        {"payload": {"status": "FAIL", "errorCode": "X", "errorDesc": "partner mismatch"}}
+    )
+    assert "partner mismatch" in nested
+
+
 def test_parse_login_rejects_bad_password() -> None:
     account = _account()
     try:

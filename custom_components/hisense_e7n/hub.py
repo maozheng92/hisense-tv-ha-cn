@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from homeassistant.components import persistent_notification
@@ -101,6 +102,7 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
         self.selected_source: str | None = None
         self.last_app: str | None = None
         self.aijia: AijiaTokens | None = None
+        self._aijia_fetch_at = 0.0
         self._pin_notified = False
         client.add_listener(self._on_client_state)
 
@@ -313,12 +315,16 @@ class HisenseTvHub(DataUpdateCoordinator[TvState]):
                 return
         await self.client.async_refresh_apps(wait)
 
-    async def async_refresh_aijia_apps(self) -> None:
+    async def async_refresh_aijia_apps(self, force: bool = False) -> None:
         """Fetch 爱家栏目 and apply the installed-app tiles."""
         self.sync_aijia_from_entry()
         tokens = self.aijia
         if tokens is None or not tokens.logged_in:
             return
+        now = time.time()
+        if not force and self._aijia_fetch_at and now - self._aijia_fetch_at < 3:
+            return
+        self._aijia_fetch_at = now
         from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
         session = async_get_clientsession(self.hass)
